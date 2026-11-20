@@ -23,14 +23,17 @@ namespace WaterTurn
         RectTransform geometry, board;
         Font font;
         Sprite rounded, fishSprite;
+        Sprite[] waterFrames;
+        Sprite rockSprite, woodSprite;
         Text headline, instructions, readout, status, mechanism;
         Button next, undo;
         readonly List<Button> levels = new List<Button>();
         readonly Stack<Position> history = new Stack<Position>();
         RectTransform[] waters;
+        Image[] waterImages;
         RectTransform fish, crate;
         Image gate, pearl, sensor;
-        int index, unlocked;
+        int index, unlocked, waterFrame = -1;
         float cell;
         bool busy, won;
         Position position;
@@ -50,12 +53,39 @@ namespace WaterTurn
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             rounded = MakeSprite(false);
             fishSprite = MakeSprite(true);
+            LoadArt();
             BuildInterface();
             Load(unlocked);
         }
 
+        void LoadArt()
+        {
+            var frames = new List<Sprite>();
+            for (int i = 0; i < 5; i++)
+            {
+                var frame = Resources.Load<Sprite>("Art/Water/water_" + i);
+                if (frame != null) frames.Add(frame);
+            }
+            if (frames.Count == 0)
+                Debug.LogWarning("WaterTurn: 水流动画帧缺失，回退到纯色水格。");
+            waterFrames = frames.ToArray();
+            rockSprite = Resources.Load<Sprite>("Art/Water/rock");
+            woodSprite = Resources.Load<Sprite>("Art/Water/wood");
+        }
+
+        void AnimateWater()
+        {
+            if (waters == null || waterImages == null || waterFrames.Length == 0) return;
+            int frame = Mathf.FloorToInt(Time.unscaledTime * 7f) % waterFrames.Length;
+            if (frame == waterFrame) return;
+            waterFrame = frame;
+            for (int i = 0; i < waterImages.Length; i++)
+                if (waterImages[i] != null) waterImages[i].sprite = waterFrames[frame];
+        }
+
         void Update()
         {
+            AnimateWater();
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
             if (keyboard.rKey.wasPressedThisFrame) { Load(index); return; }
@@ -139,22 +169,34 @@ namespace WaterTurn
             for (int p = 0; p < Current.Tiles.Length; p++)
             {
                 char tile = Current.Tiles[p];
-                Color c = tile == '#' ? new Color32(70, 94, 102, 255) : new Color32(16, 29, 38, 255);
-                var baseTile = Cell("Tile " + p, p, cell - 2, c);
                 if (tile == '#')
                 {
-                    var edge = ImageOn(baseTile, "Rim", Slate, rounded);
-                    edge.rectTransform.sizeDelta = new Vector2(cell - 13, 5);
-                    edge.rectTransform.anchoredPosition = new Vector2(0, cell / 2 - 9);
+                    Cell("Tile " + p, p, cell + 1, new Color32(32, 42, 52, 255));
+                    if (rockSprite != null) Cell("Rock " + p, p, cell, new Color32(188, 202, 232, 255), rockSprite);
                 }
-                if (tile == 'E') Cell("Exit", p, cell * .72f, new Color32(133, 99, 55, 255));
+                else
+                    Cell("Tile " + p, p, cell - 2, new Color32(16, 29, 38, 255));
+                if (tile == 'E')
+                {
+                    var exitTile = Cell("Exit", p, cell * .78f, new Color32(196, 148, 82, 255));
+                    var hole = ImageOn(exitTile, "Exit Hole", new Color32(26, 34, 44, 255), rounded).rectTransform;
+                    hole.sizeDelta = new Vector2(cell * .40f, cell * .40f);
+                }
                 if (tile == 'D') gate = Cell("Gate", p, cell - 12, Amber).GetComponent<Image>();
                 if (tile == 'S') sensor = Cell("Sensor", p, cell * .54f, Teal).GetComponent<Image>();
                 if (tile == 'K') pearl = Cell("Pearl", p, cell * .32f, Gold).GetComponent<Image>();
             }
             waters = new RectTransform[position.Water.Length];
+            waterImages = new Image[waters.Length];
+            waterFrame = -1;
+            bool artWater = waterFrames.Length > 0;
             for (int i = 0; i < waters.Length; i++)
-                waters[i] = Cell("Water " + i, position.Water[i], cell - 11, new Color32(48, 166, 180, 220));
+            {
+                waters[i] = artWater
+                    ? Cell("Water " + i, position.Water[i], cell + 2, Color.white, waterFrames[0])
+                    : Cell("Water " + i, position.Water[i], cell - 11, new Color32(48, 166, 180, 220));
+                waterImages[i] = waters[i].GetComponent<Image>();
+            }
             for (int p = 0; p < Current.Tiles.Length; p++)
             {
                 if (Current.Tiles[p] != 'G') continue;
@@ -168,10 +210,15 @@ namespace WaterTurn
             }
             if (position.Box >= 0)
             {
-                crate = Cell("Crate", position.Box, cell * .61f, new Color32(166, 108, 67, 255));
-                var brace = ImageOn(crate, "Crate Brace", Amber, rounded).rectTransform;
-                brace.sizeDelta = new Vector2(cell * .57f, 5);
-                brace.localRotation = Quaternion.Euler(0, 0, 45);
+                crate = woodSprite == null
+                    ? Cell("Crate", position.Box, cell * .61f, new Color32(166, 108, 67, 255))
+                    : Cell("Crate", position.Box, cell * .84f, Color.white, woodSprite);
+                if (woodSprite == null)
+                {
+                    var brace = ImageOn(crate, "Crate Brace", Amber, rounded).rectTransform;
+                    brace.sizeDelta = new Vector2(cell * .57f, 5);
+                    brace.localRotation = Quaternion.Euler(0, 0, 45);
+                }
             }
             else crate = null;
             fish = Cell("Fish", position.Fish, cell * .72f, White, fishSprite);
