@@ -23,17 +23,17 @@ namespace WaterTurn
         RectTransform geometry, board;
         Font font;
         Sprite rounded, fishSprite;
-        Sprite[] waterFrames;
+        Sprite[] waterFrames, foamFrames;
         Sprite rockSprite, woodSprite;
         Text headline, instructions, readout, status, mechanism;
         Button next, undo;
         readonly List<Button> levels = new List<Button>();
         readonly Stack<Position> history = new Stack<Position>();
-        RectTransform[] waters;
-        Image[] waterImages;
+        RectTransform[] waters, foams;
+        Image[] waterImages, foamImages;
         RectTransform fish, crate;
         Image gate, pearl, sensor;
-        int index, unlocked, waterFrame = -1;
+        int index, unlocked, waterFrame = -1, foamFrame = -1;
         float cell;
         bool busy, won;
         Position position;
@@ -69,18 +69,33 @@ namespace WaterTurn
             if (frames.Count == 0)
                 Debug.LogWarning("WaterTurn: 水流动画帧缺失，回退到纯色水格。");
             waterFrames = frames.ToArray();
+            var foam = new List<Sprite>();
+            for (int i = 0; i < 8; i++)
+            {
+                var frame = Resources.Load<Sprite>("Art/Water/foam_" + i);
+                if (frame != null) foam.Add(frame);
+            }
+            foamFrames = foam.ToArray();
             rockSprite = Resources.Load<Sprite>("Art/Water/rock");
             woodSprite = Resources.Load<Sprite>("Art/Water/wood");
         }
 
         void AnimateWater()
         {
-            if (waters == null || waterImages == null || waterFrames.Length == 0) return;
-            int frame = Mathf.FloorToInt(Time.unscaledTime * 7f) % waterFrames.Length;
-            if (frame == waterFrame) return;
-            waterFrame = frame;
-            for (int i = 0; i < waterImages.Length; i++)
-                if (waterImages[i] != null) waterImages[i].sprite = waterFrames[frame];
+            int tick = Mathf.FloorToInt(Time.unscaledTime * 7f);
+            if (waterFrames.Length > 0 && waterImages != null && tick % waterFrames.Length != waterFrame)
+            {
+                waterFrame = tick % waterFrames.Length;
+                for (int i = 0; i < waterImages.Length; i++)
+                    if (waterImages[i] != null) waterImages[i].sprite = waterFrames[waterFrame];
+            }
+            int foamTick = Mathf.FloorToInt(Time.unscaledTime * 4f);
+            if (foamFrames.Length > 0 && foamImages != null && foamTick % foamFrames.Length != foamFrame)
+            {
+                foamFrame = foamTick % foamFrames.Length;
+                for (int i = 0; i < foamImages.Length; i++)
+                    if (foamImages[i] != null) foamImages[i].sprite = foamFrames[foamFrame];
+            }
         }
 
         void Update()
@@ -186,6 +201,26 @@ namespace WaterTurn
                 if (tile == 'S') sensor = Cell("Sensor", p, cell * .54f, Teal).GetComponent<Image>();
                 if (tile == 'K') pearl = Cell("Pearl", p, cell * .32f, Gold).GetComponent<Image>();
             }
+            waterFrame = foamFrame = -1;
+            if (foamFrames.Length > 0)
+            {
+                float foamSize = (cell + 2) * 1.5f;
+                foams = new RectTransform[position.Water.Length];
+                foamImages = new Image[foams.Length];
+                for (int i = 0; i < foams.Length; i++)
+                {
+                    var rt = ImageOn(geometry, "Foam " + i, Color.white, foamFrames[0]).rectTransform;
+                    rt.sizeDelta = new Vector2(foamSize, foamSize);
+                    rt.anchoredPosition = Point(position.Water[i]);
+                    foams[i] = rt;
+                    foamImages[i] = rt.GetComponent<Image>();
+                }
+            }
+            else
+            {
+                foams = new RectTransform[0];
+                foamImages = new Image[0];
+            }
             waters = new RectTransform[position.Water.Length];
             waterImages = new Image[waters.Length];
             waterFrame = -1;
@@ -282,7 +317,10 @@ namespace WaterTurn
         {
             geometry.localRotation = Quaternion.Euler(0, 0, -angle);
             for (int i = 0; i < waters.Length; i++)
+            {
                 waters[i].anchoredPosition = Vector2.Lerp(Point(source.Water[i]), Point(target.Water[i]), fraction);
+                if (i < foams.Length) foams[i].anchoredPosition = waters[i].anchoredPosition;
+            }
             if (crate != null)
                 crate.anchoredPosition = Vector2.Lerp(Point(source.Box), Point(target.Box), fraction);
             fish.anchoredPosition = Vector2.Lerp(Point(source.Fish), Point(target.Fish), fraction);
