@@ -2,7 +2,7 @@
 
 Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原型。源代码、地图和渲染设置都在这个工程里。
 
-用 Unity Hub 将本目录添加为项目，使用指定版本打开 `Assets/Scenes/WaterTurn.unity`，然后进入 Play 模式。鼠标可点屏幕按钮。方向键或 WASD 游动，空格或 E 顺时针转 90°，Z 撤销，R 重来，H 提示。过关依次解锁，有本地进度；首局从第 1 关开始。
+用 Unity Hub 将本目录添加为项目，使用指定版本打开 `Assets/Scenes/WaterTurnHub.unity`（Build Settings 第 0 个场景），然后进入 Play 模式。序章洞穴里方向键或 WASD 游动，E 或空格与海草共鸣；进入关卡后，空格或 E 顺时针转 90°，Z 撤销，R 重来，H 提示，Esc 或“回洞穴”按钮回到序章。过关依次解锁，有本地进度；首局从序章的潮汐珍珠开始。
 
 ## 核心规则
 
@@ -11,6 +11,23 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 - 栅栏让水通过。鱼试图随水穿越栅栏时，这次操作会被挡回。
 - 水落定在青色感应格上会解锁闸门。闸门打开后水会在同一步继续下落。
 - 珍珠要由鱼亲自收集。撤销会同时恢复朝向、水、箱子、闸门和珍珠状态。
+
+## 序章 · 潮汐洞穴
+
+`Assets/Scenes/WaterTurnHub.unity` 是新的初始场景，也是一个很短的探索关：
+
+- 一座被海水淹没的旧矿道：五个石室由蜿蜒的两格宽水渠相连，周围还有干涸的侧道、岩洞和碎石。小鱼只能在水里游，干燥的洞底只是布景。
+- 潮汐珍珠沉在东南石室。游过去碰到它，西北石室的“第一关”潮心才会苏醒。
+- 游到发光海草旁按 E / 空格，海草会把小鱼送进对应的关卡。第一关永远开放；第二关的石门要等第一关通关后才打开。
+- 第一关通关后，东北（第二关）和西南（隐藏关）两扇石门同时打开。隐藏关是第 21 张地图“静水回声”，不在 20 关的编号列表里，只能从洞穴进入。
+- 关卡结算后按 Esc 或点“回洞穴”回到序章；进度、珍珠和石门状态都存在 PlayerPrefs 里。
+
+洞穴美术使用了以下免费像素素材，具体许可见 `Assets/Resources/Art/Cave/CREDITS.md`：
+
+- [Rocky Background](https://opengameart.org/content/rocky-background) · Blackwolfdave（CC0）
+- [Cave Tileset](https://opengameart.org/content/cave-tileset-4) · GrafxKid（CC0）
+- [Pixel Art Top Down - Basic](https://cainos.itch.io/pixel-art-top-down-basic) · Cainos
+- [Cave Tileset](https://opengameart.org/content/cave-tileset-5) · Vomdrache（CC0）
 
 ## 连锁关卡
 
@@ -36,12 +53,15 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 | 18 珍珠与暗门 | 鱼要先碰到珍珠。箱子、栅栏和水压闸门都参与路线。 | 10 |
 | 19 折返水道 | 拿到珍珠后还得回来，先想好木箱该停在什么地方。 | 12 |
 | 20 回潮室 | 先分配水块的任务，再决定鱼搭哪一格。集齐珍珠才能交付。 | 18 |
+| EX 静水回声 | 隐藏关。先推箱借道，再让水替你按下感应格；石门打开后回声会带你回到出口。 | 12 |
 
-章节起点 01、06、10、14、18 分别引入换水、木箱、栅栏、水压闸门、珍珠。每个章节的第一关先让玩家辨认新规则，接着用分流、借另一股水完成任务、回到先前水道等组合推进。20 关要求让箱子、鱼、先到感应格的水各履其职。
+章节起点 01、06、10、14、18 分别引入换水、木箱、栅栏、水压闸门、珍珠。每个章节的第一关先让玩家辨认新规则，接着用分流、借另一股水完成任务、回到先前水道等组合推进。20 关要求让箱子、鱼、先到感应格的水各履其职。第 21 关是洞穴隐藏关，不参与编号解锁。
 
 ## 工程入口
 
+- `Assets/WaterTurn/HubGame.cs` · 序章洞穴：程序化绘制的水潭、岩石、海草传送门、石门和可自由游动的小鱼。
+- `Assets/WaterTurn/GameSession.cs` · 洞穴与关卡场景之间的关卡选择、回程和隐藏关进度的静态桥。
 - `Assets/WaterTurn/Puzzle.cs` · 可复现的格子模拟和提示求解器。
-- `Assets/WaterTurn/Campaign.cs` · 二十张可编辑的地图、关名和提示。
+- `Assets/WaterTurn/Campaign.cs` · 二十张编号地图、一张隐藏地图、关名和提示。
 - `Assets/WaterTurn/WaterGame.cs` · 关卡进度、动画、键盘与屏幕操作。
 - `Packages/manifest.json` · Universal 2D 模板依赖和已安装进工程的 `com.unity.pipeline` 1.0.0。

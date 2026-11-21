@@ -2,8 +2,11 @@ namespace WaterTurn
 {
     public static class Campaign
     {
-        public static readonly string[] Chapters = {"01 / 换乘","02 / 挡水","03 / 隔栅","04 / 开闸","05 / 回潮"};
-        public static int Chapter(int level) => level < 5 ? 0 : level < 9 ? 1 : level < 13 ? 2 : level < 17 ? 3 : 4;
+        /// <summary>The twenty numbered chambers. The extra level after them is the hub's secret.</summary>
+        public const int VisibleLevels = 20;
+
+        public static readonly string[] Chapters = {"01 / 换乘","02 / 挡水","03 / 隔栅","04 / 开闸","05 / 回潮","EX / 回声"};
+        public static int Chapter(int level) => level >= VisibleLevels ? 5 : level < 5 ? 0 : level < 9 ? 1 : level < 13 ? 2 : level < 17 ? 3 : 4;
 
         public static readonly Level[] Levels =
         {
@@ -47,6 +50,11 @@ namespace WaterTurn
                 "########", "#.S..#.#", "#..~~#.#", "#.GPB.##", "#.K##E##", "#D.....#", "########"),
             new Level("回潮室", "先分配水块的任务，再决定鱼搭哪一格。集齐珍珠才能交付。",
                 "########", "##.S.D.#", "#K.....#", "#......#", "#.~~E..#", "#.PB..G#", "########"),
+
+            // Hidden chamber 21. It is not part of the numbered grid: the only way in
+            // is the golden seaweed behind the stone door of the tidal cave.
+            new Level("静水回声", "先把木箱推去挡水，再让水替你按下感应格。石门打开后，回声会带你回到出口。",
+                "#########", "#.......#", "#.K..S..#", "#.......#", "#..PB~..#", "#..~~~..#", "###D#####", "#E......#", "#########"),
         };
     }
 }

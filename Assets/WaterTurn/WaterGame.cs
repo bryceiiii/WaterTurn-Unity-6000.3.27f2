@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace WaterTurn
@@ -26,7 +27,7 @@ namespace WaterTurn
         Sprite[] waterFrames, foamFrames;
         Sprite rockSprite, woodSprite;
         Text headline, instructions, readout, status, mechanism;
-        Button next, undo;
+        Button next, undo, home;
         readonly List<Button> levels = new List<Button>();
         readonly Stack<Position> history = new Stack<Position>();
         RectTransform[] waters, foams;
@@ -42,20 +43,26 @@ namespace WaterTurn
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
+            if (SceneManager.GetActiveScene().name == GameSession.HubScene) return;
             if (FindFirstObjectByType<WaterGame>() == null)
                 new GameObject("WaterTurn").AddComponent<WaterGame>();
         }
 
         void Awake()
         {
-            unlocked = Mathf.Clamp(PlayerPrefs.GetInt(Progress, 0), 0, Campaign.Levels.Length - 1);
+            unlocked = Mathf.Clamp(PlayerPrefs.GetInt(Progress, 0), 0, Campaign.VisibleLevels - 1);
             font = Font.CreateDynamicFontFromOSFont(new[] {"Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial"}, 28);
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             rounded = MakeSprite(false);
             fishSprite = MakeSprite(true);
             LoadArt();
             BuildInterface();
-            Load(unlocked);
+
+            int start = GameSession.StartLevel >= 0
+                ? Mathf.Clamp(GameSession.StartLevel, 0, Campaign.Levels.Length - 1)
+                : unlocked;
+            GameSession.StartLevel = -1;
+            Load(start);
         }
 
         void LoadArt()
@@ -103,10 +110,16 @@ namespace WaterTurn
             AnimateWater();
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
+            if (keyboard.escapeKey.wasPressedThisFrame) { ReturnToHub(); return; }
             if (keyboard.rKey.wasPressedThisFrame) { Load(index); return; }
             if (keyboard.zKey.wasPressedThisFrame) { Undo(); return; }
             if (keyboard.hKey.wasPressedThisFrame) { Hint(); return; }
-            if (won && keyboard.enterKey.wasPressedThisFrame) { Advance(); return; }
+            if (won && keyboard.enterKey.wasPressedThisFrame)
+            {
+                if (index >= Campaign.VisibleLevels) ReturnToHub();
+                else Advance();
+                return;
+            }
             if (keyboard.spaceKey.wasPressedThisFrame || keyboard.eKey.wasPressedThisFrame) Play(Move.Turn);
             else if (keyboard.upArrowKey.wasPressedThisFrame || keyboard.wKey.wasPressedThisFrame) Play(Move.Up);
             else if (keyboard.rightArrowKey.wasPressedThisFrame || keyboard.dKey.wasPressedThisFrame) Play(Move.Right);
@@ -135,6 +148,7 @@ namespace WaterTurn
             var stage = Place(root, "Layout", 0, 0, 1280, 800);
             Label(stage, "借水过河", 58, -49, 545, 67, 49, White, FontStyle.Bold);
             Label(stage, "GRID PUZZLE  /  TTURN", 58, -113, 545, 30, 17, Teal, FontStyle.Bold);
+            home = Control(stage, "回洞穴  Esc", 1108, -45, 120, 38, ReturnToHub, false, 15);
             PanelAt(stage, "BoardFrame", 57, -157, 694, 594);
             PanelAt(stage, "ControlPanel", 774, -157, 450, 594);
             board = Place(stage, "BoardCenter", 404, -452, 0, 0);
@@ -156,7 +170,7 @@ namespace WaterTurn
             Control(stage, "提示 H", 1004, -586, 96, 40, Hint);
             next = Control(stage, "下一关 ↵", 1105, -586, 99, 40, Advance, true);
             Label(stage, "关卡  ·  通关后解锁下一关", 800, -638, 390, 25, 16, Quiet);
-            for (int i = 0; i < Campaign.Levels.Length; i++)
+            for (int i = 0; i < Campaign.VisibleLevels; i++)
             {
                 int target = i;
                 levels.Add(Control(stage, (i + 1).ToString("00"), 800 + (i % 10) * 40, -665 - (i / 10) * 34, 36, 30,
@@ -166,12 +180,15 @@ namespace WaterTurn
 
         void Load(int target)
         {
+            if (index != target) GameSession.LastCompletedLevel = -1;
             StopAllCoroutines();
             index = target;
             history.Clear();
             busy = won = false;
             position = Puzzle.Begin(Current);
-            headline.text = (index + 1).ToString("00") + "  " + Current.Name;
+            headline.text = index >= Campaign.VisibleLevels
+                ? "EX  " + Current.Name
+                : (index + 1).ToString("00") + "  " + Current.Name;
             instructions.text = Current.Hint;
             if (geometry != null)
             {
@@ -298,12 +315,30 @@ namespace WaterTurn
             position = result;
             won = Puzzle.Won(Current, result);
             busy = false;
-            status.text = won ? (index == Campaign.Levels.Length - 1 ? "通关！全部二十关已完成。" : "到达出口，已解锁下一关。") :
-                !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
-                !source.Gate && result.Gate ? "感应格进水，闸门已打开。" :
-                result.Fish == Current.Exit ? "先收集珍珠，出口才会开启。" :
-                source.Box != result.Box ? "箱子已移位，留意新的水路。" : "水已落定。";
-            if (won && index == unlocked && index < Campaign.Levels.Length - 1)
+            if (won)
+            {
+                GameSession.LastCompletedLevel = index;
+                if (index == 0)
+                {
+                    PlayerPrefs.SetInt(GameSession.HiddenUnlockedKey, 1);
+                    PlayerPrefs.SetInt(GameSession.HubPearlKey, 1);
+                }
+                if (index >= Campaign.VisibleLevels)
+                    PlayerPrefs.SetInt(GameSession.HiddenClearedKey, 1);
+                PlayerPrefs.Save();
+                status.text = index >= Campaign.VisibleLevels
+                    ? "隐藏关完成！回声沉入水底。按 Esc 回到潮汐洞穴。"
+                    : index == Campaign.VisibleLevels - 1
+                        ? "通关！全部二十关已完成。按 Esc 回到潮汐洞穴。"
+                        : "到达出口，已解锁下一关。按 Esc 回到潮汐洞穴。";
+            }
+            else
+                status.text =
+                    !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
+                    !source.Gate && result.Gate ? "感应格进水，闸门已打开。" :
+                    result.Fish == Current.Exit ? "先收集珍珠，出口才会开启。" :
+                    source.Box != result.Box ? "箱子已移位，留意新的水路。" : "水已落定。";
+            if (won && index == unlocked && index < Campaign.VisibleLevels - 1)
             {
                 unlocked++;
                 PlayerPrefs.SetInt(Progress, unlocked);
@@ -339,7 +374,7 @@ namespace WaterTurn
                 (Current.Sensor < 0 ? "" : "   ·   青色为感应格") +
                 (Current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
-            next.gameObject.SetActive(won && index + 1 < Campaign.Levels.Length);
+            next.gameObject.SetActive(won && index + 1 < Campaign.VisibleLevels);
             for (int i = 0; i < levels.Count; i++)
             {
                 levels[i].interactable = i <= unlocked;
@@ -349,8 +384,29 @@ namespace WaterTurn
 
         void Advance()
         {
-            if (won && index + 1 < Campaign.Levels.Length) Load(index + 1);
+            if (won && index + 1 < Campaign.VisibleLevels) Load(index + 1);
         }
+
+        void ReturnToHub()
+        {
+            GameSession.EnterHub();
+        }
+
+#if UNITY_EDITOR
+        public void DebugPlayRoute(string route)
+        {
+            StartCoroutine(DebugRoute(route));
+        }
+
+        IEnumerator DebugRoute(string route)
+        {
+            foreach (char c in route)
+            {
+                Play((Move)(c - '0'));
+                yield return new WaitForSeconds(.5f);
+            }
+        }
+#endif
 
         void Undo()
         {

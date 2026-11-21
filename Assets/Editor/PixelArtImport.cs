@@ -15,13 +15,19 @@ sealed class PixelArtImport : AssetPostprocessor
 
         var importer = (TextureImporter)assetImporter;
         bool sourceSheet = assetPath.Contains("/Source/");
+        bool cave = assetPath.Contains("/Art/Cave/");
+        bool water = assetPath.Contains("/Art/Water/");
 
-        importer.textureType = sourceSheet ? TextureImporterType.Default : TextureImporterType.Sprite;
+        // Cave sheets are cropped into sprites at runtime, so keep them as
+        // plain readable textures.  The water frames are also upscaled and
+        // given rounded corners in memory, which needs readable pixels.
+        importer.textureType = sourceSheet || cave ? TextureImporterType.Default : TextureImporterType.Sprite;
         importer.filterMode = FilterMode.Point;
         importer.mipmapEnabled = false;
-        importer.wrapMode = TextureWrapMode.Clamp;
+        importer.wrapMode = cave ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
         importer.textureCompression = TextureImporterCompression.Uncompressed;
         importer.alphaIsTransparency = true;
+        importer.isReadable = cave || water;
         importer.npotScale = TextureImporterNPOTScale.None;
         importer.maxTextureSize = 2048;
         importer.spritePixelsPerUnit = 16f;
