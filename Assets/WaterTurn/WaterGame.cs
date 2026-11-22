@@ -23,7 +23,11 @@ namespace WaterTurn
 
         RectTransform geometry, board;
         Font font;
-        Sprite rounded, fishSprite;
+        Sprite rounded;
+        Sprite[] fishSwim;
+        Image fishImage;
+        float fishAnim;
+        int fishFrame = -1;
         Sprite[] waterFrames, foamFrames;
         Sprite rockSprite, woodSprite;
         Text headline, instructions, readout, status, mechanism;
@@ -53,8 +57,8 @@ namespace WaterTurn
             unlocked = Mathf.Clamp(PlayerPrefs.GetInt(Progress, 0), 0, Campaign.VisibleLevels - 1);
             font = Font.CreateDynamicFontFromOSFont(new[] {"Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial"}, 28);
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            rounded = MakeSprite(false);
-            fishSprite = MakeSprite(true);
+            rounded = MakeRounded();
+            fishSwim = FishArt.Swim(FishFacing.Right);
             LoadArt();
             BuildInterface();
 
@@ -105,9 +109,21 @@ namespace WaterTurn
             }
         }
 
+        void AnimateFish()
+        {
+            if (fishImage == null) return;
+            fishAnim += Time.unscaledDeltaTime;
+            int frame = FishArt.FrameAt(fishAnim);
+            if (frame == fishFrame) return;
+            fishFrame = frame;
+            if (fishSwim != null && fishSwim.Length > 0)
+                fishImage.sprite = fishSwim[Mathf.Clamp(frame, 0, fishSwim.Length - 1)];
+        }
+
         void Update()
         {
             AnimateWater();
+            AnimateFish();
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
             if (keyboard.escapeKey.wasPressedThisFrame) { ReturnToHub(); return; }
@@ -273,7 +289,10 @@ namespace WaterTurn
                 }
             }
             else crate = null;
-            fish = Cell("Fish", position.Fish, cell * .72f, White, fishSprite);
+            fish = Cell("Fish", position.Fish, cell * .68f, White,
+                fishSwim != null && fishSwim.Length > 0 ? fishSwim[0] : null);
+            fishImage = fish.GetComponent<Image>();
+            fishImage.preserveAspect = true;
             Paint(position, position, position.Turn * 90f, 1);
             status.text = "把鱼送到金色出口。";
             Refresh();
@@ -509,7 +528,7 @@ namespace WaterTurn
             return button;
         }
 
-        static Sprite MakeSprite(bool fish)
+        static Sprite MakeRounded()
         {
             const int size = 64;
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -517,23 +536,13 @@ namespace WaterTurn
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
-                if (fish)
-                {
-                    float u = (x - 35) / 21f, v = (y - 31) / 13f;
-                    bool body = u * u + v * v <= 1;
-                    bool tail = x >= 8 && x <= 19 && Mathf.Abs(y - 31) < (21 - x) * .84f;
-                    if (body || tail) colors[y * size + x] = y >= 30 ? new Color32(255, 207, 146, 255) : new Color32(243, 154, 102, 255);
-                    if ((x - 46) * (x - 46) + (y - 34) * (y - 34) <= 5)
-                        colors[y * size + x] = new Color32(19, 33, 40, 255);
-                    continue;
-                }
                 float cornerX = Mathf.Max(0, Mathf.Abs(x - 31.5f) - 24);
                 float cornerY = Mathf.Max(0, Mathf.Abs(y - 31.5f) - 24);
                 if (cornerX * cornerX + cornerY * cornerY < 59) colors[y * size + x] = new Color32(255,255,255,255);
             }
             texture.SetPixels32(colors);
             texture.Apply();
-            var border = fish ? Vector4.zero : new Vector4(9, 9, 9, 9);
+            var border = new Vector4(9, 9, 9, 9);
             return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(.5f, .5f), 100, 0, SpriteMeshType.FullRect, border);
         }
     }

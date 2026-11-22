@@ -72,14 +72,15 @@ namespace WaterTurn
         static readonly Color Dormant = new Color32(92, 105, 84, 255);
 
         Font font;
-        Sprite rounded, solid, ellipse, fishSprite, leafSprite, glowSprite, ringSprite;
+        Sprite rounded, solid, ellipse, leafSprite, glowSprite, ringSprite;
         Sprite pearlSprite, orbSprite, bubbleSprite, vignetteSprite, shaftSprite;
+        Sprite[] fishSwim;
         Sprite[] waterFrames;
         Sprite floorSprite, shrineSprite, rockPropSprite, potSprite, statueSprite, crystalFormationSprite;
         Texture2D rockTexture, propsTexture, grafxTexture, crystalsTexture;
 
         RectTransform canvasRoot, mapRoot, fishRoot, fishImage, pearlRoot, promptRoot, toastRoot;
-        Image fade, pearlGlow, fishGlow, tunnelImage;
+        Image fade, pearlGlow, fishGlow, tunnelImage, fishSpriteImage;
         Texture2D[] tunnelTextures;
         Sprite[] tunnelSprites;
         Text objective, progress, promptText, promptKey, toastText;
@@ -90,7 +91,9 @@ namespace WaterTurn
         readonly List<Bubble> bubbles = new List<Bubble>();
 
         Vector2 fishPos, fishVel;
-        float fishAngle, fishBob, bubbleClock;
+        float fishBob, bubbleClock, fishAnim;
+        FishFacing fishFacing = FishFacing.Right, fishShown = (FishFacing)(-1);
+        int fishFrame = -1;
         bool pearlTaken, level1Cleared, hiddenUnlocked, hiddenCleared, traveling;
         bool justCompletedFirst, gatesStartOpen;
         float toastTimer, promptAlpha;
@@ -136,7 +139,7 @@ namespace WaterTurn
             rounded = MakeRounded();
             solid = MakeSolid();
             ellipse = MakeEllipse(64);
-            fishSprite = MakeFish();
+            fishSwim = FishArt.Swim(FishFacing.Right);
             leafSprite = MakeLeaf();
             glowSprite = MakeGlow(128);
             ringSprite = MakeRing(128, 0.045f);
@@ -305,10 +308,12 @@ namespace WaterTurn
             fishRoot = Box(mapRoot, "Fish", CellPosition(22, 16), new Vector2(40, 40), Center);
             fishGlow = Img(fishRoot, "FishGlow", glowSprite, new Color(0.42f, 0.95f, 0.90f, 0.20f),
                 Vector2.zero, new Vector2(64, 64));
-            fishImage = Box(fishRoot, "FishImage", Vector2.zero, new Vector2(32, 32), Center);
+            fishImage = Box(fishRoot, "FishImage", Vector2.zero, new Vector2(34, 34), Center);
             var fishRectImage = fishImage.gameObject.AddComponent<Image>();
-            fishRectImage.sprite = fishSprite;
+            fishRectImage.sprite = fishSwim != null && fishSwim.Length > 0 ? fishSwim[0] : null;
+            fishRectImage.preserveAspect = true;
             fishRectImage.raycastTarget = false;
+            fishSpriteImage = fishRectImage;
 
             AddBubbleVents();
         }
@@ -840,17 +845,20 @@ namespace WaterTurn
             }
 
             float speed = fishVel.magnitude;
-            if (speed > 8f)
-            {
-                float target = Mathf.Atan2(fishVel.y, fishVel.x) * Mathf.Rad2Deg;
-                fishAngle = Mathf.LerpAngle(fishAngle, target, Mathf.Clamp01(dt * 9f));
-            }
+            if (speed > 8f) fishFacing = FishArt.FacingOf(fishVel, fishFacing);
             fishBob = Mathf.Sin(Time.unscaledTime * 2.4f) * 1.2f;
             fishRoot.anchoredPosition = fishPos + new Vector2(0, fishBob);
-            bool left = Mathf.Abs(Mathf.DeltaAngle(fishAngle, 180f)) < 90f;
-            fishImage.localRotation = Quaternion.Euler(0, 0, left ? 180f - fishAngle : fishAngle);
-            float wiggle = 1f + Mathf.Sin(Time.unscaledTime * 13f) * 0.025f * Mathf.Clamp01(speed / 80f);
-            fishImage.localScale = new Vector3((left ? -1f : 1f) * wiggle, 1f, 1f);
+
+            fishAnim += dt;
+            int frame = FishArt.FrameAt(fishAnim);
+            if (fishSpriteImage != null && (frame != fishFrame || fishFacing != fishShown))
+            {
+                fishFrame = frame;
+                fishShown = fishFacing;
+                var frames = FishArt.Swim(fishFacing);
+                if (frames != null && frames.Length > 0)
+                    fishSpriteImage.sprite = frames[Mathf.Clamp(frame, 0, frames.Length - 1)];
+            }
 
             bubbleClock -= dt;
             if (speed > 40f && bubbleClock <= 0)
@@ -1002,7 +1010,6 @@ namespace WaterTurn
         {
             fishPos = CellPosition(22, 16);
             fishVel = Vector2.zero;
-            fishAngle = 0;
         }
 
         // ------------------------------------------------------------ interaction
@@ -1491,63 +1498,6 @@ namespace WaterTurn
             tex.Apply();
             tex.filterMode = FilterMode.Bilinear;
             return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(.5f, .5f), size);
-        }
-
-        static Sprite MakeFish()
-        {
-            const int size = 64;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            var pixels = new Color32[size * size];
-            var filled = new bool[size * size];
-            for (int y = 0; y < size; y++)
-            for (int x = 0; x < size; x++)
-            {
-                float u = (x - 37) / 19.5f, v = (y - 31) / 12.5f;
-                bool body = u * u + v * v <= 1;
-                bool tail = x >= 8 && x <= 19 && Mathf.Abs(y - 31) < (20 - x) * .90f;
-                bool fin = x >= 29 && x <= 41 && y >= 42 && Mathf.Abs(x - 34) < (y - 41) * .80f;
-                bool belly = x >= 29 && x <= 42 && y <= 20 && Mathf.Abs(x - 35) < (21 - y) * .55f;
-                if (body || tail || fin || belly) filled[y * size + x] = true;
-            }
-            for (int y = 0; y < size; y++)
-            for (int x = 0; x < size; x++)
-            {
-                int i = y * size + x;
-                if (!filled[i])
-                {
-                    bool edge = false;
-                    for (int oy = -1; oy <= 1 && !edge; oy++)
-                    for (int ox = -1; ox <= 1; ox++)
-                    {
-                        int nx = x + ox, ny = y + oy;
-                        if (nx >= 0 && nx < size && ny >= 0 && ny < size && filled[ny * size + nx])
-                        {
-                            edge = true;
-                            break;
-                        }
-                    }
-                    if (edge) pixels[i] = new Color32(12, 24, 31, 255);
-                    continue;
-                }
-                Color body = y >= 33 ? new Color32(255, 218, 164, 255) : new Color32(243, 156, 96, 255);
-                if (x < 21) body = new Color32(255, 162, 108, 255);
-                if (y > 41) body = new Color32(255, 186, 108, 255);
-                if (y < 22 && x > 30) body = new Color32(255, 235, 198, 255);
-                pixels[i] = body;
-            }
-            for (int y = -4; y <= 4; y++)
-            for (int x = -4; x <= 4; x++)
-            {
-                if (x * x + y * y > 17) continue;
-                int px = 47 + x, py = 35 + y;
-                if (px >= 0 && px < size && py >= 0 && py < size)
-                    pixels[py * size + px] = new Color32(14, 27, 34, 255);
-            }
-            pixels[36 * size + 48] = new Color32(235, 255, 248, 255);
-            tex.SetPixels32(pixels);
-            tex.Apply();
-            tex.filterMode = FilterMode.Point;
-            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(.5f, .5f), 100);
         }
 
         static Sprite MakeLeaf()

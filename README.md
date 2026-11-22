@@ -29,6 +29,15 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 - [Pixel Art Top Down - Basic](https://cainos.itch.io/pixel-art-top-down-basic) · Cainos
 - [Cave Tileset](https://opengameart.org/content/cave-tileset-5) · Vomdrache（CC0）
 
+## 小鱼美术
+
+洞穴里自由游动的小鱼和每关棋盘上的鱼棋子，现在共用同一套像素素材（48×48，四方向游动 + 四方向跳跃）：
+
+- `Assets/Resources/Art/Fish/swim_{right,left,up,down}_0..3.png` · 四方向游动，每帧 110 ms。洞穴里按游动方向切换朝向并循环播放；关卡里播放右向循环。
+- `Assets/Resources/Art/Fish/Jump/jump_{right,left,up,down}_0..3.png` · 跳跃四段（100 / 70 / 130 / 90 ms），已导入备用，暂时没有接进玩法。
+- 导入规则沿用 `Assets/Editor/PixelArtImport.cs`：Point 过滤、无压缩、16 PPU、Center 轴心、48×48 不裁边，因此每帧重心一致，切换方向不会跳。
+- 换素材时保持 48×48 画布、文件名不变即可，`Assets/WaterTurn/FishArt.cs` 会按名字加载。
+
 ## 连锁关卡
 
 | 关卡 | 重点 | C# 求解器最短步数 |
@@ -59,7 +68,8 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 
 ## 工程入口
 
-- `Assets/WaterTurn/HubGame.cs` · 序章洞穴：程序化绘制的水潭、岩石、海草传送门、石门和可自由游动的小鱼。
+- `Assets/WaterTurn/HubGame.cs` · 序章洞穴：程序化绘制的水潭、岩石、海草传送门、石门和可自由游动的小鱼（精灵来自 `Art/Fish`）。
+- `Assets/WaterTurn/FishArt.cs` · 小鱼四方向游动帧的加载、帧计时和朝向判定；跳跃帧已导入但未接入。
 - `Assets/WaterTurn/GameSession.cs` · 洞穴与关卡场景之间的关卡选择、回程和隐藏关进度的静态桥。
 - `Assets/WaterTurn/Puzzle.cs` · 可复现的格子模拟和提示求解器。
 - `Assets/WaterTurn/Campaign.cs` · 二十张编号地图、一张隐藏地图、关名和提示。
