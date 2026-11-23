@@ -71,6 +71,89 @@ namespace AgentBuild
             return string.Join("\n", Report);
         }
 
+        public static string RebuildHud()
+        {
+            Rounded = EnsureRoundedSprite();
+            PreviewFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var hud = BuildHudPrefab();
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            return hud == null ? "hud rebuild failed" : "hud rebuilt: " + AssetDatabase.GetAssetPath(hud);
+        }
+
+        /// <summary>
+        /// Edits UI_GameHud.prefab in place so the fileIDs are preserved — the
+        /// board's Room object in every level scene is parented to BoardCenter
+        /// inside this prefab, and a rebuild would orphan it.
+        /// </summary>
+        public static string UpgradeHud()
+        {
+            const string path = "Assets/Prefabs/UI/UI_GameHud.prefab";
+            Rounded = EnsureRoundedSprite();
+            PreviewFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+
+            var root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                var layout = root.transform.Find("Layout") as RectTransform;
+                var hud = root.GetComponent<GameHud>();
+                if (layout == null || hud == null) return "hud prefab layout missing";
+                if (layout.Find("SidePanel") != null) return "already upgraded";
+
+                var side = Place(layout, "SidePanel", 774, -157, 450, 594);
+                var group = side.gameObject.AddComponent<CanvasGroup>();
+
+                var movers = new List<RectTransform>();
+                var controlPanel = layout.Find("ControlPanel") as RectTransform;
+                if (controlPanel != null) movers.Add(controlPanel);
+                movers.Add(hud.headline.rectTransform);
+                movers.Add(hud.instructions.rectTransform);
+                movers.Add(hud.mechanism.rectTransform);
+                movers.Add(hud.status.rectTransform);
+                movers.Add(hud.readout.rectTransform);
+                movers.Add(hud.up.transform as RectTransform);
+                movers.Add(hud.down.transform as RectTransform);
+                movers.Add(hud.left.transform as RectTransform);
+                movers.Add(hud.right.transform as RectTransform);
+                movers.Add(hud.turn.transform as RectTransform);
+                movers.Add(hud.undo.transform as RectTransform);
+                movers.Add(hud.restart.transform as RectTransform);
+                movers.Add(hud.hint.transform as RectTransform);
+                movers.Add(hud.next.transform as RectTransform);
+                foreach (var button in hud.levelButtons)
+                    if (button != null) movers.Add(button.transform as RectTransform);
+                foreach (Transform child in layout)
+                {
+                    var text = child.GetComponent<Text>();
+                    if (text != null && text.text.StartsWith("关卡")) movers.Add(child as RectTransform);
+                }
+
+                foreach (var mover in movers) MoveInto(mover, side);
+
+                hud.boardFrame = layout.Find("BoardFrame") as RectTransform;
+                hud.sidePanel = side;
+                hud.sidePanelGroup = group;
+                hud.panelToggle = Control(layout, "隐藏面板 ▶", 998, -45, 100, 38, false, 15);
+                hud.panelToggleLabel = hud.panelToggle.GetComponentInChildren<Text>(true);
+
+                EditorUtility.SetDirty(hud);
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                return "hud upgraded: " + movers.Count + " elements moved";
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+        }
+
+        static void MoveInto(RectTransform rect, RectTransform parent)
+        {
+            if (rect == null) return;
+            Vector2 position = rect.anchoredPosition;
+            rect.SetParent(parent, false);
+            rect.anchoredPosition = position + new Vector2(-774f, 157f);
+        }
+
         // ---------------------------------------------------------------- folders
 
         static void EnsureFolder(string path)
@@ -250,41 +333,50 @@ namespace AgentBuild
             Label(stage, "借水过河", 58, -49, 545, 67, 49, White, FontStyle.Bold);
             Label(stage, "GRID PUZZLE  /  TTURN", 58, -113, 545, 30, 17, Teal, FontStyle.Bold);
             hud.home = Control(stage, "回洞穴  Esc", 1108, -45, 120, 38, false, 15);
+            hud.panelToggle = Control(stage, "隐藏面板 ▶", 998, -45, 100, 38, false, 15);
+            hud.panelToggleLabel = hud.panelToggle.GetComponentInChildren<Text>(true);
+
             PanelAt(stage, "BoardFrame", 57, -157, 694, 594);
-            PanelAt(stage, "ControlPanel", 774, -157, 450, 594);
+            hud.boardFrame = (RectTransform) stage.Find("BoardFrame");
 
             hud.boardArea = Place(stage, "BoardCenter", 404, -452, 0, 0);
             hud.boardArea.name = "BoardCenter";
 
             Label(stage, "重力  ↓", 635, -171, 104, 27, 17, Quiet);
 
-            hud.headline = Label(stage, "", 800, -181, 400, 45, 28, White, FontStyle.Bold);
+            // Everything on the right lives in one container so it can slide away.
+            var side = Place(stage, "SidePanel", 774, -157, 450, 594);
+            hud.sidePanel = side;
+            hud.sidePanelGroup = side.gameObject.AddComponent<CanvasGroup>();
+            PanelAt(side, "ControlPanel", 0, 0, 450, 594);
+
+            hud.headline = Label(side, "", 26, -24, 400, 45, 28, White, FontStyle.Bold);
             hud.headline.gameObject.name = "Headline";
-            hud.instructions = Label(stage, "", 800, -230, 391, 61, 18, Quiet);
+            hud.instructions = Label(side, "", 26, -73, 391, 61, 18, Quiet);
             hud.instructions.gameObject.name = "Instructions";
-            hud.mechanism = Label(stage, "", 800, -295, 394, 71, 16, Teal);
+            hud.mechanism = Label(side, "", 26, -138, 394, 71, 16, Teal);
             hud.mechanism.gameObject.name = "Mechanism";
-            hud.status = Label(stage, "", 800, -371, 389, 63, 19, Amber);
+            hud.status = Label(side, "", 26, -214, 389, 63, 19, Amber);
             hud.status.gameObject.name = "Status";
-            hud.readout = Label(stage, "", 800, -437, 380, 32, 16, Quiet);
+            hud.readout = Label(side, "", 26, -280, 380, 32, 16, Quiet);
             hud.readout.gameObject.name = "Readout";
 
-            hud.up = Control(stage, "↑", 868, -480, 52, 42);
-            hud.left = Control(stage, "←", 812, -526, 52, 42);
-            hud.down = Control(stage, "↓", 868, -526, 52, 42);
-            hud.right = Control(stage, "→", 924, -526, 52, 42);
-            hud.turn = Control(stage, "转房间  /  空格", 992, -493, 205, 62, true);
-            hud.undo = Control(stage, "撤销 Z", 800, -586, 96, 40);
-            hud.restart = Control(stage, "重来 R", 902, -586, 96, 40);
-            hud.hint = Control(stage, "提示 H", 1004, -586, 96, 40);
-            hud.next = Control(stage, "下一关 ↵", 1105, -586, 99, 40, true);
+            hud.up = Control(side, "↑", 94, -323, 52, 42);
+            hud.left = Control(side, "←", 38, -369, 52, 42);
+            hud.down = Control(side, "↓", 94, -369, 52, 42);
+            hud.right = Control(side, "→", 150, -369, 52, 42);
+            hud.turn = Control(side, "转房间  /  空格", 218, -336, 205, 62, true);
+            hud.undo = Control(side, "撤销 Z", 26, -429, 96, 40);
+            hud.restart = Control(side, "重来 R", 128, -429, 96, 40);
+            hud.hint = Control(side, "提示 H", 230, -429, 96, 40);
+            hud.next = Control(side, "下一关 ↵", 331, -429, 99, 40, true);
             hud.next.gameObject.SetActive(false);
-            Label(stage, "关卡  ·  通关后解锁下一关", 800, -638, 390, 25, 16, Quiet);
+            Label(side, "关卡  ·  通关后解锁下一关", 26, -481, 390, 25, 16, Quiet);
 
             hud.levelButtons = new Button[Campaign.VisibleLevels];
             for (int i = 0; i < Campaign.VisibleLevels; i++)
-                hud.levelButtons[i] = Control(stage, (i + 1).ToString("00"),
-                    800 + (i % 10) * 40, -665 - (i / 10) * 34, 36, 30, false, 16);
+                hud.levelButtons[i] = Control(side, (i + 1).ToString("00"),
+                    26 + (i % 10) * 40, -508 - (i / 10) * 34, 36, 30, false, 16);
 
             return SavePrefab(root, "Assets/Prefabs/UI/UI_GameHud.prefab");
         }

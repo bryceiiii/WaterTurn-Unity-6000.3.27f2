@@ -73,3 +73,26 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ===== 本项目补充 =====
+
+# MCP for Unity：第三方开发工具，以「内嵌包」方式装在本地，不纳入版本库。
+# 换机器时用 Package Manager 装 https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity 即可，
+# 客户端配置见 ~/.workbuddy/mcp.json（http://127.0.0.1:8080/mcp）。
+/Packages/com.coplaydev.unity-mcp/
+
+# 转场/特效流程验证的临时截图（正式素材截图仍照常提交）
+/[Ss]creenshots/fx_*.png
+
+# Unity MCP 本地服务器运行痕迹（PID/日志）
+/[Ll]ogs/mcp-*.log
+*.mcp-pid
+
+# 编辑器与系统本地文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.bak
+*~

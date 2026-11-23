@@ -17,6 +17,8 @@ sealed class PixelArtImport : AssetPostprocessor
         bool sourceSheet = assetPath.Contains("/Source/");
         bool cave = assetPath.Contains("/Art/Cave/");
         bool water = assetPath.Contains("/Art/Water/");
+        // Ground tiles are authored seamless, so they must repeat, not clamp.
+        bool ground = assetPath.Contains("/Art/Ground/");
 
         // Cave sheets are cropped into sprites at runtime, so keep them as
         // plain readable textures.  The water frames are also upscaled and
@@ -24,7 +26,7 @@ sealed class PixelArtImport : AssetPostprocessor
         importer.textureType = sourceSheet || cave ? TextureImporterType.Default : TextureImporterType.Sprite;
         importer.filterMode = FilterMode.Point;
         importer.mipmapEnabled = false;
-        importer.wrapMode = cave ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
+        importer.wrapMode = cave || ground ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
         importer.textureCompression = TextureImporterCompression.Uncompressed;
         importer.alphaIsTransparency = true;
         importer.isReadable = cave || water;

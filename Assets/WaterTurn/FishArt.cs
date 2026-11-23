@@ -27,6 +27,26 @@ namespace WaterTurn
         static readonly Sprite[][] jump = new Sprite[4][];
         static bool swimReady;
 
+        /// <summary>The single death set: hit, twitch, belly-up, drift, sink, vanish.</summary>
+        static Sprite[] death;
+        static bool deathReady;
+
+        /// <summary>Per-frame durations of the death set, straight from the Aseprite tags.</summary>
+        public static readonly float[] DeathSeconds = {.09f, .12f, .15f, .18f, .22f, .32f};
+
+        public const int DeathFrameCount = 6;
+
+        /// <summary>Whole death animation, about 1.08 s.</summary>
+        public static float DeathTotalSeconds
+        {
+            get
+            {
+                float total = 0f;
+                foreach (float seconds in DeathSeconds) total += seconds;
+                return total;
+            }
+        }
+
         /// <summary>True once every swim frame has been found in Resources.</summary>
         public static bool Ready => swimReady;
 
@@ -41,6 +61,29 @@ namespace WaterTurn
             var set = jump[(int)facing];
             if (set == null || set.Length == 0 || set[0] == null) LoadSet(jump, "jump");
             return jump[(int)facing];
+        }
+
+        /// <summary>
+        /// The death frames. They are drawn facing right; mirror the Image for a
+        /// left-facing death (the art pack has one arrow for this set by design).
+        /// </summary>
+        public static Sprite[] Death()
+        {
+            if (!deathReady)
+            {
+                var frames = new Sprite[DeathFrameCount];
+                bool complete = true;
+                for (int i = 0; i < DeathFrameCount; i++)
+                {
+                    frames[i] = Resources.Load<Sprite>("Art/Fish/death_" + i);
+                    if (frames[i] == null) complete = false;
+                }
+                death = frames;
+                deathReady = complete;
+                if (!complete)
+                    Debug.LogWarning("WaterTurn: 小鱼死亡动画缺失（Art/Fish/death_0..5）。");
+            }
+            return death;
         }
 
         /// <summary>Current animation frame for a running clock, in seconds.</summary>

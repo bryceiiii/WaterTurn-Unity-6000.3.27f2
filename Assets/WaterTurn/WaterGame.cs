@@ -24,7 +24,7 @@ namespace WaterTurn
         LevelDefinition definition;
         LevelBoard boardView;
         Level current;
-        Sprite[] fishSwim;
+        FishFacing fishFacing = FishFacing.Right, fishShown = (FishFacing)(-1);
         Image fishImage;
         Sprite waterGlowSprite;
         RectTransform waterGlowLayer;
@@ -43,8 +43,26 @@ namespace WaterTurn
         Image gate, pearl, sensor;
         int index, unlocked, waterFrame = -1, foamFrame = -1;
         float cell;
-        bool busy, won;
+        bool busy, won, dying;
         Position position;
+
+        const float BoardFrameLeft = 57f;
+        const float BoardFrameWidth = 694f;
+        const float BoardFrameWidthExpanded = 1167f;
+        const float BoardFrameHeight = 594f;
+        const float BoardCenterShownX = 404f;
+        const float BoardCenterY = -452f;
+        const float SidePanelShownX = 774f;
+        const float SidePanelHiddenX = 1264f;
+        const float SidePanelTop = -157f;
+        const float PanelSlideSeconds = .34f;
+
+        RectTransform sidePanel, boardFrame, boardCenter;
+        CanvasGroup sideGroup;
+        Text panelToggleLabel;
+        Coroutine panelRoutine;
+        bool panelHidden;
+        bool leaving;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -72,10 +90,63 @@ namespace WaterTurn
                 new[] {"Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial"}, 28);
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             hud.ApplySkin(font, MakeRounded());
-            fishSwim = FishArt.Swim(FishFacing.Right);
+            FishArt.Swim(fishFacing);   // loads all four sets up front
             LoadArt();
+            EnsureTurnButtons();
             WireHud();
             Load();
+        }
+
+        void EnsureTurnButtons()
+        {
+            if (hud.turn == null || hud.turnLeft != null) return;
+
+            var source = (RectTransform)hud.turn.transform;
+            float width = source.sizeDelta.x;
+            float height = source.sizeDelta.y;
+            Vector2 position = source.anchoredPosition;
+            const float gap = 10f;
+            float half = Mathf.Max(48f, (width - gap) * .5f);
+            float offset = (width + gap) * .25f;
+
+            var clone = Instantiate(hud.turn.gameObject, source.parent);
+            clone.name = "逆时针 / Q";
+            var cloneRect = (RectTransform)clone.transform;
+            cloneRect.sizeDelta = new Vector2(half, height);
+            cloneRect.anchoredPosition = new Vector2(position.x - offset, position.y);
+            cloneRect.SetSiblingIndex(source.GetSiblingIndex());
+
+            source.sizeDelta = new Vector2(half, height);
+            source.anchoredPosition = new Vector2(position.x + offset, position.y);
+
+            var clockwise = source.GetComponentInChildren<Text>(true);
+            if (clockwise != null)
+            {
+                clockwise.text = "顺时针 空格";
+                clockwise.fontSize = 13;
+                FitTurnLabel(clockwise, half, height);
+            }
+            var counter = clone.GetComponentInChildren<Text>(true);
+            if (counter != null)
+            {
+                counter.text = "逆时针 Q";
+                counter.fontSize = 13;
+                FitTurnLabel(counter, half, height);
+            }
+            hud.turnLeft = clone.GetComponent<Button>();
+        }
+
+        static void FitTurnLabel(Text label, float width, float height)
+        {
+            var rect = label.rectTransform;
+            rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
+            rect.pivot = new Vector2(.5f, .5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(Mathf.Max(48f, width - 10f), height - 12f);
+            label.alignment = TextAnchor.MiddleCenter;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 9;
+            label.resizeTextMaxSize = 13;
         }
 
         void WireHud()
@@ -83,6 +154,12 @@ namespace WaterTurn
             home = hud.home;
             next = hud.next;
             undo = hud.undo;
+
+            sidePanel = hud.sidePanel;
+            sideGroup = hud.sidePanelGroup;
+            boardFrame = hud.boardFrame;
+            boardCenter = hud.boardArea;
+            panelToggleLabel = hud.panelToggleLabel;
 
             home.onClick.AddListener(ReturnToHub);
             next.onClick.AddListener(Advance);
@@ -94,6 +171,9 @@ namespace WaterTurn
             hud.left.onClick.AddListener(() => Play(Move.Left));
             hud.right.onClick.AddListener(() => Play(Move.Right));
             hud.turn.onClick.AddListener(() => Play(Move.Turn));
+            if (hud.turnLeft != null)
+                hud.turnLeft.onClick.AddListener(() => Play(Move.TurnLeft));
+            hud.panelToggle.onClick.AddListener(ToggleSidePanel);
 
             if (hud.levelButtons == null) return;
             for (int i = 0; i < hud.levelButtons.Length; i++)
@@ -102,7 +182,7 @@ namespace WaterTurn
                 var button = hud.levelButtons[i];
                 if (button == null) continue;
                 levels.Add(button);
-                button.onClick.AddListener(() => LevelManager.Instance.LoadLevel(target));
+                button.onClick.AddListener(() => WaterFx.GoToLevel(target));
             }
         }
 
@@ -271,13 +351,31 @@ namespace WaterTurn
 
         void AnimateFish()
         {
-            if (fishImage == null) return;
+            if (fishImage == null || dying) return;
             fishAnim += Time.unscaledDeltaTime;
             int frame = FishArt.FrameAt(fishAnim);
-            if (frame == fishFrame) return;
+            // The four swim sets are separate drawings, so a change of facing has
+            // to repaint even when the frame index itself did not move.
+            if (frame == fishFrame && fishFacing == fishShown) return;
             fishFrame = frame;
-            if (fishSwim != null && fishSwim.Length > 0)
-                fishImage.sprite = fishSwim[Mathf.Clamp(frame, 0, fishSwim.Length - 1)];
+            fishShown = fishFacing;
+            var frames = FishArt.Swim(fishFacing);
+            if (frames != null && frames.Length > 0)
+                fishImage.sprite = frames[Mathf.Clamp(frame, 0, frames.Length - 1)];
+        }
+
+        /// <summary>
+        /// The fish is counter-rotated so it stays upright on screen while the room
+        /// turns, so its swim set has to be picked from the direction it travels on
+        /// screen, not from the room's grid axes.
+        /// </summary>
+        FishFacing ScreenFacing(Vector2 step, float angle)
+        {
+            if (step.sqrMagnitude < 1f) return fishFacing;
+            float radians = -angle * Mathf.Deg2Rad;
+            float cos = Mathf.Cos(radians), sin = Mathf.Sin(radians);
+            var screen = new Vector2(step.x * cos - step.y * sin, step.x * sin + step.y * cos);
+            return FishArt.FacingOf(screen, fishFacing);
         }
 
         void Update()
@@ -286,17 +384,14 @@ namespace WaterTurn
             AnimateFish();
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
+            if (dying || leaving) return;
             if (keyboard.escapeKey.wasPressedThisFrame) { ReturnToHub(); return; }
             if (keyboard.rKey.wasPressedThisFrame) { Restart(); return; }
             if (keyboard.zKey.wasPressedThisFrame) { Undo(); return; }
             if (keyboard.hKey.wasPressedThisFrame) { Hint(); return; }
-            if (won && keyboard.enterKey.wasPressedThisFrame)
-            {
-                if (index >= Campaign.VisibleLevels) ReturnToHub();
-                else Advance();
-                return;
-            }
-            if (keyboard.spaceKey.wasPressedThisFrame || keyboard.eKey.wasPressedThisFrame) Play(Move.Turn);
+            if (keyboard.tabKey.wasPressedThisFrame) { ToggleSidePanel(); return; }
+            if (keyboard.qKey.wasPressedThisFrame) Play(Move.TurnLeft);
+            else if (keyboard.spaceKey.wasPressedThisFrame || keyboard.eKey.wasPressedThisFrame) Play(Move.Turn);
             else if (keyboard.upArrowKey.wasPressedThisFrame || keyboard.wKey.wasPressedThisFrame) Play(Move.Up);
             else if (keyboard.rightArrowKey.wasPressedThisFrame || keyboard.dKey.wasPressedThisFrame) Play(Move.Right);
             else if (keyboard.downArrowKey.wasPressedThisFrame || keyboard.sKey.wasPressedThisFrame) Play(Move.Down);
@@ -353,9 +448,83 @@ namespace WaterTurn
             if (fishImage != null) fishImage.preserveAspect = true;
 
             waterFrame = foamFrame = -1;
+            leaving = dying = false;
+            if (fish != null) fish.localScale = Vector3.one;
             Paint(position, position, position.Turn * 90f, 1);
             hud.status.text = "把鱼送到金色出口。";
             Refresh();
+            ApplySidePanelHidden();
+        }
+
+        /// <summary>The panel starts collapsed, so the level opens at full size.</summary>
+        void ApplySidePanelHidden()
+        {
+            panelHidden = true;
+            if (sidePanel == null) return;
+            sidePanel.gameObject.SetActive(false);
+            if (sideGroup != null)
+            {
+                sideGroup.alpha = 0f;
+                sideGroup.interactable = false;
+                sideGroup.blocksRaycasts = false;
+            }
+            boardFrame.sizeDelta = new Vector2(BoardFrameWidthExpanded, BoardFrameHeight);
+            boardCenter.anchoredPosition =
+                new Vector2(BoardFrameLeft + BoardFrameWidthExpanded * .5f, BoardCenterY);
+            boardCenter.localScale = Vector3.one * ZoomScale();
+            if (panelToggleLabel != null) panelToggleLabel.text = "显示面板 ◀";
+        }
+
+        /// <summary>
+        /// Gates and grates both kill. A gate kills when the fish ends up standing on
+        /// it (swimming in, or a turn carrying it there); a grate kills the moment a
+        /// move would drag the fish into the bars. Either way the death set plays,
+        /// the screen shatters, and the chamber reloads from black.
+        /// </summary>
+        IEnumerator DeathSequence(string reason = "小鱼碰到了闸门 —— 冷光一闪。")
+        {
+            if (dying) yield break;
+            dying = true;
+            busy = true;
+            if (hud.status != null) hud.status.text = reason;
+            if (fish != null)
+                fish.localScale = new Vector3(fishFacing == FishFacing.Left ? -1f : 1f, 1f, 1f);
+            StartCoroutine(PlayDeathAnimation());
+            Vector2 screen = fish != null ? (Vector2)fish.position : Vector2.zero;
+            yield return WaterFx.Instance.DeathBlast(screen);
+            WaterFx.RestartLevelUnderBlack();
+        }
+
+        IEnumerator PlayDeathAnimation()
+        {
+            var frames = FishArt.Death();
+            if (frames == null || frames.Length == 0) yield break;
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (fishImage == null || fish == null) yield break;
+                fishImage.sprite = frames[i];
+                float duration = i < FishArt.DeathSeconds.Length ? FishArt.DeathSeconds[i] : .15f;
+                for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
+                    yield return null;
+            }
+        }
+
+        /// <summary>Settlement: soften the room, pop the card, then iris back to the cave.</summary>
+        IEnumerator ClearSequence()
+        {
+            if (leaving) yield break;
+            leaving = true;
+            yield return new WaitForSecondsRealtime(.35f);
+            string title = index >= Campaign.VisibleLevels ? "隐藏关完成"
+                : index == Campaign.VisibleLevels - 1 ? "全部通关" : "过关";
+            var lines = new List<string>
+            {
+                "步数   " + history.Count,
+                current.Sensor >= 0 ? "闸门   " + (position.Gate ? "已开" : "未开") : "水路   已接通",
+                current.Pearl >= 0 ? "珍珠   " + (position.Pearl ? "1 / 1" : "0 / 1") : "评价   从容通过",
+            };
+            yield return WaterFx.Instance.ShowClearCard(title, (index + 1).ToString("00") + "  " + current.Name, lines);
+            WaterFx.GoToHub(index);
         }
 
         void SetHeader()
@@ -368,30 +537,47 @@ namespace WaterTurn
 
         void Play(Move move)
         {
-            if (won || busy || position == null) return;
+            if (won || busy || dying || position == null) return;
             Position result = Puzzle.Apply(current, position, move, out Block block);
             if (result == null)
             {
-                hud.status.text = block == Block.Grate ? "这一步会让鱼穿过栅栏。换一格水再试。" :
-                    block == Block.Crate ? "箱子前面没有可以推入的位置。" : "鱼只能进入相邻的水格。";
+                // Grates are lethal too: the move that would drag the fish into the
+                // bars kills it instead of being politely refused. Crate pushes that
+                // merely hit a grate are still just blocked (Block.Crate).
+                if (block == Block.Grate)
+                {
+                    // Let the fatal move finish on the board first: the fish is
+                    // dragged onto the bars, then the death sequence takes over.
+                    Position lethal = Puzzle.ApplyLethal(current, position, move, out bool touched);
+                    if (lethal != null && touched)
+                    {
+                        StartCoroutine(Animate(move, lethal, true));
+                        return;
+                    }
+                }
+                hud.status.text = block == Block.Crate ? "箱子前面没有可以推入的位置。" : "鱼只能进入相邻的水格。";
                 return;
             }
+            // Rotating is always allowed, even when the turn would carry the fish
+            // into a gate. The gate is what kills; the turn is just how the fish
+            // got there — Animate's gate check handles it once the room settles.
             StartCoroutine(Animate(move, result));
         }
 
-        IEnumerator Animate(Move move, Position result)
+        IEnumerator Animate(Move move, Position result, bool fatal = false)
         {
             busy = true;
             Position source = position;
             float angle = source.Turn * 90;
-            if (move == Move.Turn)
+            if (move == Move.Turn || move == Move.TurnLeft)
             {
+                float direction = move == Move.Turn ? 1f : -1f;
                 for (float t = 0; t < .19f; t += Time.unscaledDeltaTime)
                 {
-                    Paint(source, source, angle + 90 * Mathf.SmoothStep(0, 1, t / .19f), 0);
+                    Paint(source, source, angle + direction * 90 * Mathf.SmoothStep(0, 1, t / .19f), 0);
                     yield return null;
                 }
-                angle += 90;
+                angle += direction * 90;
             }
             for (float t = 0; t < .16f; t += Time.unscaledDeltaTime)
             {
@@ -414,11 +600,16 @@ namespace WaterTurn
                     PlayerPrefs.SetInt(GameSession.HiddenClearedKey, 1);
                 PlayerPrefs.Save();
                 hud.status.text = index >= Campaign.VisibleLevels
-                    ? "隐藏关完成！回声沉入水底。按 Esc 回到潮汐洞穴。"
+                    ? "隐藏关完成！回声沉入水底。"
                     : index == Campaign.VisibleLevels - 1
-                        ? "通关！全部二十关已完成。按 Esc 回到潮汐洞穴。"
-                        : "到达出口，已解锁下一关。按 Esc 回到潮汐洞穴。";
+                        ? "通关！全部二十关已完成。"
+                        : "到达出口，已解锁下一关。";
+                StartCoroutine(ClearSequence());
             }
+            else if (Puzzle.OnGate(current, position) || fatal)
+                StartCoroutine(DeathSequence(Puzzle.OnGate(current, position)
+                    ? "小鱼碰到了闸门 —— 冷光一闪。"
+                    : "小鱼撞上了栅栏。"));
             else
                 hud.status.text =
                     !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
@@ -451,8 +642,10 @@ namespace WaterTurn
                 crate.anchoredPosition = Vector2.Lerp(Point(source.Box), Point(target.Box), fraction);
             if (fish != null)
             {
-                fish.anchoredPosition = Vector2.Lerp(Point(source.Fish), Point(target.Fish), fraction);
+                Vector2 from = Point(source.Fish), to = Point(target.Fish);
+                fish.anchoredPosition = Vector2.Lerp(from, to, fraction);
                 fish.localRotation = Quaternion.Euler(0, 0, angle);
+                fishFacing = ScreenFacing(to - from, angle);
             }
             if (gate != null) gate.color = target.Gate ? new Color32(255, 193, 124, 53) : Amber;
             if (sensor != null) sensor.color = target.Gate ? Teal : new Color32(55, 120, 124, 255);
@@ -468,7 +661,9 @@ namespace WaterTurn
                 (current.Sensor < 0 ? "" : "   ·   青色为感应格") +
                 (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
-            next.gameObject.SetActive(won && index + 1 < Campaign.VisibleLevels);
+            // Clearing a chamber always returns to the tidal cave, so the panel
+            // never offers a direct jump to the next one.
+            next.gameObject.SetActive(false);
             for (int i = 0; i < levels.Count; i++)
             {
                 levels[i].interactable = i <= unlocked;
@@ -476,21 +671,103 @@ namespace WaterTurn
             }
         }
 
+        void ToggleSidePanel()
+        {
+            ShowSidePanel(panelHidden);
+        }
+
+        /// <summary>
+        /// Slides the right-hand panel off-screen and lets the board frame grow
+        /// into the freed width, zooming the whole level to fit the larger box.
+        /// </summary>
+        void ShowSidePanel(bool show)
+        {
+            if (sidePanel == null || boardFrame == null || boardCenter == null) return;
+            if (panelRoutine == null && panelHidden == !show) return;
+            panelHidden = !show;
+            if (panelRoutine != null) StopCoroutine(panelRoutine);
+            panelRoutine = StartCoroutine(AnimateSidePanel(show));
+        }
+
+        IEnumerator AnimateSidePanel(bool show)
+        {
+            // It may have been deactivated by a previous hide, so activate it for
+            // either direction and animate from its current state.
+            sidePanel.gameObject.SetActive(true);
+
+            Vector2 frameFrom = boardFrame.sizeDelta;
+            Vector2 frameTo = show
+                ? new Vector2(BoardFrameWidth, BoardFrameHeight)
+                : new Vector2(BoardFrameWidthExpanded, BoardFrameHeight);
+            Vector2 centerFrom = boardCenter.anchoredPosition;
+            Vector2 centerTo = show
+                ? new Vector2(BoardCenterShownX, BoardCenterY)
+                : new Vector2(BoardFrameLeft + BoardFrameWidthExpanded * .5f, BoardCenterY);
+            float scaleFrom = boardCenter.localScale.x;
+            float scaleTo = show ? 1f : ZoomScale();
+            Vector2 panelFrom = sidePanel.anchoredPosition;
+            Vector2 panelTo = show
+                ? new Vector2(SidePanelShownX, SidePanelTop)
+                : new Vector2(SidePanelHiddenX, SidePanelTop);
+            float alphaFrom = sideGroup != null ? sideGroup.alpha : 1f;
+            float alphaTo = show ? 1f : 0f;
+
+            if (sideGroup != null)
+            {
+                sideGroup.interactable = show;
+                sideGroup.blocksRaycasts = show;
+            }
+
+            for (float elapsed = 0f; elapsed < PanelSlideSeconds;)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / PanelSlideSeconds));
+                boardFrame.sizeDelta = Vector2.Lerp(frameFrom, frameTo, t);
+                boardCenter.anchoredPosition = Vector2.Lerp(centerFrom, centerTo, t);
+                boardCenter.localScale = Vector3.one * Mathf.Lerp(scaleFrom, scaleTo, t);
+                sidePanel.anchoredPosition = Vector2.Lerp(panelFrom, panelTo, t);
+                if (sideGroup != null) sideGroup.alpha = Mathf.Lerp(alphaFrom, alphaTo, t);
+                yield return null;
+            }
+
+            boardFrame.sizeDelta = frameTo;
+            boardCenter.anchoredPosition = centerTo;
+            boardCenter.localScale = Vector3.one * scaleTo;
+            sidePanel.anchoredPosition = panelTo;
+            if (sideGroup != null) sideGroup.alpha = alphaTo;
+            if (!show) sidePanel.gameObject.SetActive(false);
+            if (panelToggleLabel != null)
+                panelToggleLabel.text = show ? "隐藏面板 ▶" : "显示面板 ◀";
+            panelRoutine = null;
+        }
+
+        /// <summary>How far the board can grow once the panel is gone.</summary>
+        float ZoomScale()
+        {
+            if (current == null) return 1f;
+            float extent = Mathf.Max(current.Width, current.Height) * cell;
+            if (extent <= 0f) return 1f;
+            float room = Mathf.Min(BoardFrameWidthExpanded * .88f, BoardFrameHeight * .88f);
+            return Mathf.Clamp(room / extent, 1f, 2.6f);
+        }
+
         void Advance()
         {
             if (!won || index + 1 >= Campaign.VisibleLevels) return;
-            LevelManager.Instance.LoadLevel(index + 1);
+            WaterFx.GoToLevel(index + 1);
         }
 
         void Restart()
         {
-            if (LevelManager.Instance != null) LevelManager.Instance.RestartLevel();
-            else Load();
+            if (dying) return;
+            if (LevelManager.Instance == null) Load();
+            else WaterFx.RestartLevelWithIris();
         }
 
         void ReturnToHub()
         {
-            GameSession.EnterHub(index);
+            if (dying) return;
+            WaterFx.GoToHub(index);
         }
 
 #if UNITY_EDITOR
@@ -524,7 +801,7 @@ namespace WaterTurn
             if (busy || won) return;
             string route = Puzzle.Solve(current, position);
             hud.status.text = route == null ? "这个局面走不到出口。撤销一步，试试另一条路线。" :
-                "下一步可以" + new[] {"向上游。","向右游。","向下游。","向左游。","转动房间。"}[route[0] - '0'];
+                "下一步可以" + new[] {"向上游。","向右游。","向下游。","向左游。","顺时针转动房间。","逆时针转动房间。"}[route[0] - '0'];
         }
 
         Vector2 Point(int p) => new Vector2((p % current.Width - (current.Width - 1) * .5f) * cell,

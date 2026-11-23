@@ -11,6 +11,16 @@ namespace WaterTurn
     {
         [Header("Containers")]
         public RectTransform boardArea;
+        public RectTransform boardFrame;
+
+        [Tooltip("Right-hand panel that can slide away.")]
+        public RectTransform sidePanel;
+
+        public CanvasGroup sidePanelGroup;
+
+        [Header("Panel toggle")]
+        public Button panelToggle;
+        public Text panelToggleLabel;
 
         [Header("Text")]
         public Text headline;
@@ -30,6 +40,7 @@ namespace WaterTurn
         public Button left;
         public Button right;
         public Button turn;
+        public Button turnLeft;
 
         [Header("Level picker (20)")]
         public Button[] levelButtons = new Button[0];

@@ -132,7 +132,9 @@ namespace WaterTurn
             RefreshWaterTiles();
             SnapCamera();
             RefreshHud();
-            StartCoroutine(FadeInRoutine());
+            // A level→cave trip arrives behind the shared iris, so the hub must
+            // not also fade from black on top of it.
+            if (!WaterFx.PendingIrisOpen) StartCoroutine(FadeInRoutine());
             if (justCompletedFirst) StartCoroutine(RevealDoorsOnReturn());
             else if (justCompletedHidden) StartCoroutine(ShowHiddenReturn());
             else StartCoroutine(ShowPuzzleIntro());
@@ -1988,13 +1990,13 @@ namespace WaterTurn
             {
                 t += Time.unscaledDeltaTime;
                 float k = Mathf.Clamp01(t / .78f);
-                fade.color = new Color(0.04f, 0.022f, 0.016f, k);
                 fishRoot.localRotation = Quaternion.Euler(0, 0, k * 460f);
                 fishRoot.localScale = Vector3.one * (1f - k * .7f);
                 fishRoot.anchoredPosition = Vector2.Lerp(fishPos, portal.Position, k);
                 yield return null;
             }
-            GameSession.EnterLevel(portal.Level);
+            yield return WaterFx.Close(.42f);
+            WaterFx.GoToLevelAfterClose(portal.Level);
         }
 
         IEnumerator RevealDoorsOnReturn()
