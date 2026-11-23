@@ -26,6 +26,23 @@ namespace WaterTurn
         const float SwimSpeed = 148f;
         const float SwimAcceleration = 900f;
         const float SwimDrag = 700f;
+        [Header("Camera Authoring")]
+        [Tooltip("Default zoom when no saved value exists.")]
+        public float defaultZoom = 1.2f;
+        public float minZoom = 1.06f;
+        public float maxZoom = 2.2f;
+        [Tooltip("Positive moves the fish down on screen; use it to leave room for the HUD.")]
+        public float cameraBiasY = -80f;
+        public float followSpeed = 7f;
+        public float zoomSpeed = 12f;
+        public Vector2 viewSize = new Vector2(1280f, 800f);
+
+        [Header("Scene Authoring")]
+        [Tooltip("Use HubPortalAnchor objects in the scene instead of the hard-coded 20 entrances.")]
+        public bool useSceneAnchors = true;
+
+        const string ZoomKey = "WaterTurn.HubZoom.v1";
+        float cameraZoom, zoomTarget;
 
         static readonly string[] Map =
         {
@@ -83,7 +100,7 @@ namespace WaterTurn
         Image fade, pearlGlow, fishGlow, tunnelImage, fishSpriteImage;
         Texture2D[] tunnelTextures;
         Sprite[] tunnelSprites;
-        Text objective, progress, promptText, promptKey, toastText;
+        Text objective, progress, promptText, promptKey, toastText, zoomReadout;
         CanvasGroup promptGroup, toastGroup;
 
         readonly List<Portal> portals = new List<Portal>();
@@ -111,6 +128,8 @@ namespace WaterTurn
 
         void Awake()
         {
+            cameraZoom = zoomTarget = Mathf.Clamp(
+                PlayerPrefs.GetFloat(ZoomKey, defaultZoom), minZoom, maxZoom);
             level1Cleared = GameSession.LevelsCleared >= 1;
             hiddenUnlocked = GameSession.HiddenUnlocked;
             hiddenCleared = GameSession.HiddenCleared;
@@ -118,11 +137,14 @@ namespace WaterTurn
             justCompletedFirst = GameSession.LastCompletedLevel == 0;
             bool justCompletedHidden = GameSession.LastCompletedLevel >= Campaign.VisibleLevels;
             GameSession.LastCompletedLevel = -1;
+            int returnLevel = GameSession.ReturnLevel;
+            GameSession.ReturnLevel = -1;
             gatesStartOpen = level1Cleared && !justCompletedFirst;
             BuildArt();
             BuildInterface();
             BuildMap();
-            ResetFish();
+            ResetFish(returnLevel);
+            SnapCamera();
             RefreshHud();
             StartCoroutine(FadeInRoutine());
             if (justCompletedFirst) StartCoroutine(RevealDoorsOnReturn());
@@ -198,6 +220,9 @@ namespace WaterTurn
             innerImage.sprite = rounded;
             innerImage.type = Image.Type.Sliced;
             innerImage.color = new Color32(22, 14, 13, 255);
+            // The hub uses a scrolling map viewport now; a fixed frame would not
+            // move with the camera.
+            frame.gameObject.SetActive(false);
 
             mapRoot = Box(canvasRoot, "Cave", Vector2.zero, new Vector2(W * Cell, H * Cell), Center);
 
@@ -234,7 +259,7 @@ namespace WaterTurn
             title.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.65f);
             Label(hud, "Subtitle", "TIDAL HOLLOW  ·  序章", 15, Teal, TextAnchor.MiddleLeft,
                 new Vector2(44, -82), new Vector2(620, 24), FontStyle.Bold);
-            Label(hud, "Deck", "被水淹没的旧矿道，连着五座石室与三处潮心。", 14, Quiet,
+            Label(hud, "Deck", "被水淹没的旧矿道，五座石室藏着二十处潮心。", 14, Quiet,
                 TextAnchor.MiddleLeft, new Vector2(44, -106), new Vector2(720, 22));
 
             var objectivePanel = PanelImage(hud, "ObjectivePanel", new Vector2(42, -138), new Vector2(650, 58),
@@ -254,6 +279,8 @@ namespace WaterTurn
                 TextAnchor.MiddleLeft, new Vector2(42, -734), new Vector2(640, 24));
             Label(hud, "Footer", "小鱼只能在水里游  ·  被水淹没的矿道通向关卡", 12, new Color32(166, 128, 105, 255),
                 TextAnchor.MiddleRight, new Vector2(930, -734), new Vector2(308, 24));
+            zoomReadout = Label(hud, "ZoomReadout", "", 12, new Color32(196, 158, 126, 255),
+                TextAnchor.MiddleRight, new Vector2(930, -710), new Vector2(308, 20));
 
             promptRoot = Box(hud, "Prompt", new Vector2(385, -664), new Vector2(510, 64), new Vector2(0, 1));
             var promptBack = promptRoot.gameObject.AddComponent<Image>();
@@ -298,9 +325,7 @@ namespace WaterTurn
             AddProps();
             AddStartMarker();
 
-            AddPortal(7, 9, 0, "第一关", "先游，再转", Kelp, new Color(0.35f, 0.85f, 0.62f, 1f));
-            AddPortal(37, 9, 1, "第二关", "同水异路", ColdKelp, new Color(0.38f, 0.62f, 1f, 1f));
-            AddPortal(7, 19, Campaign.VisibleLevels, "隐藏关", "静水回声", HideKelp, new Color(1f, 0.72f, 0.30f, 1f));
+            BuildPortals();
 
             AddGates();
             AddPearl();
@@ -634,32 +659,47 @@ namespace WaterTurn
             label.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, 0.7f);
         }
 
-        void AddPortal(int x, int y, int level, string title, string subtitle, Color active, Color halo)
+        void AddPortal(int x, int y, int level, string title, string subtitle,
+            Color active, Color halo, bool compact = true)
         {
-            var root = Box(mapRoot, "Portal " + title, CellPosition(x, y), new Vector2(96, 96), Center);
+            AddPortalAt(CellPosition(x, y), level, title, subtitle, active, halo, compact);
+        }
+
+        void AddPortalAt(Vector2 position, int level, string title, string subtitle,
+            Color active, Color halo, bool compact = true)
+        {
+            bool hidden = level >= Campaign.VisibleLevels;
+            float rootSize = hidden ? 78f : compact ? 66f : 96f;
+            var root = Box(mapRoot, "Portal " + title, position,
+                new Vector2(rootSize, rootSize), Center);
             var p = new Portal
             {
-                Level = level, X = x, Y = y, Title = title, Subtitle = subtitle,
+                Level = level, Position = position, Title = title, Subtitle = subtitle,
                 Active = active, HaloColor = halo, Root = root, Awake = 0,
-                Phase = (x * 0.37f + y * 0.23f) % 6.28f
+                Phase = (position.x * 0.011f + position.y * 0.008f) % 6.28f
             };
 
-            Img(root, "Beam", glowSprite, new Color(halo.r, halo.g, halo.b, 0.10f),
-                new Vector2(0, 8), new Vector2(84, 150));
+            Img(root, "Beam", glowSprite, new Color(halo.r, halo.g, halo.b, compact ? .07f : .10f),
+                new Vector2(0, compact ? 5f : 8f), new Vector2(compact ? 58f : 84f, compact ? 92f : 150f));
             p.Halo = Img(root, "Halo", glowSprite, new Color(halo.r, halo.g, halo.b, 0.22f),
-                Vector2.zero, new Vector2(124, 124));
+                Vector2.zero, new Vector2(hidden ? 96f : compact ? 78f : 124f,
+                    hidden ? 96f : compact ? 78f : 124f));
             Img(root, "Shrine", shrineSprite != null ? shrineSprite : ellipse,
-                new Color(0.94f, 0.70f, 0.50f, 0.96f), new Vector2(0, -10), new Vector2(64, 56));
+                new Color(0.94f, 0.70f, 0.50f, 0.96f), new Vector2(0, compact ? -6f : -10f),
+                compact ? new Vector2(44, 38) : new Vector2(64, 56));
             p.Ring = Img(root, "Ring", ringSprite, new Color(halo.r, halo.g, halo.b, 0.35f),
-                new Vector2(0, -2), new Vector2(64, 64));
+                new Vector2(0, -2), new Vector2(compact ? 38f : 64f, compact ? 38f : 64f));
 
-            var leaves = Box(root, "Leaves", new Vector2(0, -6), new Vector2(90, 90), Center);
+            var leaves = Box(root, "Leaves", new Vector2(0, compact ? -4f : -6f),
+                new Vector2(72, 72), Center);
             var rng = new System.Random(40 + level);
-            for (int i = 0; i < 7; i++)
+            int outer = compact ? 4 : 7;
+            for (int i = 0; i < outer; i++)
             {
-                float angle = i * 360f / 7f + rng.Next(-9, 10);
+                float angle = i * 360f / outer + rng.Next(-9, 10);
                 var leaf = Box(leaves, "Leaf", Vector2.zero,
-                    new Vector2(11, 30 + rng.Next(-8, 16)), new Vector2(.5f, 0f));
+                    new Vector2(compact ? 8f : 11f, compact ? 20f + rng.Next(-4, 8) : 30f + rng.Next(-8, 16)),
+                    new Vector2(.5f, 0f));
                 var im = leaf.gameObject.AddComponent<Image>();
                 im.sprite = leafSprite;
                 im.raycastTarget = false;
@@ -668,10 +708,12 @@ namespace WaterTurn
                 p.Leaves.Add(im);
                 p.LeafAngles.Add(angle);
             }
-            for (int i = 0; i < 4; i++)
+            int inner = compact ? 2 : 4;
+            for (int i = 0; i < inner; i++)
             {
-                float angle = i * 90f + 30f;
-                var leaf = Box(leaves, "LeafInner", Vector2.zero, new Vector2(9, 20), new Vector2(.5f, 0f));
+                float angle = i * (360f / inner) + 30f;
+                var leaf = Box(leaves, "LeafInner", Vector2.zero,
+                    new Vector2(compact ? 7f : 9f, compact ? 12f : 20f), new Vector2(.5f, 0f));
                 var im = leaf.gameObject.AddComponent<Image>();
                 im.sprite = leafSprite;
                 im.raycastTarget = false;
@@ -681,27 +723,79 @@ namespace WaterTurn
                 p.LeafAngles.Add(angle);
             }
 
-            p.Core = Img(root, "Core", orbSprite, Color.white, new Vector2(0, 5), new Vector2(30, 30));
-            for (int i = 0; i < 3; i++)
+            p.Core = Img(root, "Core", orbSprite, Color.white, new Vector2(0, compact ? 3f : 5f),
+                new Vector2(compact ? 18f : 30f, compact ? 18f : 30f));
+            int beads = compact ? 2 : 3;
+            for (int i = 0; i < beads; i++)
             {
-                float a = (i * 137f + x * 13f) * Mathf.Deg2Rad;
+                float a = (i * 137f + level * 13f) * Mathf.Deg2Rad;
                 Img(root, "Bead", bubbleSprite, new Color(0.85f, 1f, 0.95f, 0.30f),
-                    new Vector2(Mathf.Cos(a) * 18f, Mathf.Sin(a) * 14f + 7f),
-                    new Vector2(4 + i, 4 + i));
+                    new Vector2(Mathf.Cos(a) * (compact ? 12f : 18f), Mathf.Sin(a) * (compact ? 9f : 14f) + 5f),
+                    new Vector2(compact ? 3f : 4f + i, compact ? 3f : 4f + i));
             }
 
-            float labelY = -50f;
-            var labelBack = Box(root, "LabelBack", new Vector2(0, labelY), new Vector2(186, 25), Center);
+            float labelY = hidden ? -44f : compact ? -31f : -50f;
+            float labelW = hidden ? 104f : compact ? 54f : 186f;
+            float labelH = hidden ? 24f : compact ? 20f : 25f;
+            var labelBack = Box(root, "LabelBack", new Vector2(0, labelY),
+                new Vector2(labelW, labelH), Center);
             var labelImage = labelBack.gameObject.AddComponent<Image>();
             labelImage.sprite = rounded;
             labelImage.type = Image.Type.Sliced;
             labelImage.color = new Color32(28, 17, 14, 218);
             labelImage.raycastTarget = false;
-            p.Label = CenterLabel(root, "PortalLabel", title, 14, active, TextAnchor.MiddleCenter,
-                new Vector2(0, labelY), new Vector2(178, 21), FontStyle.Bold);
+            p.Label = CenterLabel(root, "PortalLabel", title, compact ? 12 : 14, active,
+                TextAnchor.MiddleCenter, new Vector2(0, labelY),
+                new Vector2(labelW - 8f, labelH - 4f), FontStyle.Bold);
             p.Label.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, 0.85f);
 
             portals.Add(p);
+        }
+
+        void BuildPortals()
+        {
+            // Scene-authored entrances take priority. The anchors are ordinary
+            // GameObjects under TidalHollow, so they can be dragged in the Scene
+            // view and their labels/colours edited in the Inspector.
+            if (useSceneAnchors)
+            {
+                var anchors = FindObjectsByType<HubPortalAnchor>(FindObjectsSortMode.None);
+                if (anchors.Length > 0)
+                {
+                    System.Array.Sort(anchors, (a, b) => a.level.CompareTo(b.level));
+                    foreach (var anchor in anchors)
+                    {
+                        if (anchor == null) continue;
+                        AddPortalAt(anchor.transform.localPosition, anchor.level,
+                            anchor.ResolvedTitle, anchor.ResolvedSubtitle,
+                            anchor.activeColor, anchor.haloColor, anchor.compact);
+                    }
+                    return;
+                }
+            }
+
+            // Fallback: the original generated layout. This keeps the hub usable
+            // if every anchor has been deleted.
+            AddChapterPortals(0, 7, 9, Kelp, new Color(0.35f, 0.85f, 0.62f, 1f));
+            AddChapterPortals(4, 37, 9, ColdKelp, new Color(0.38f, 0.62f, 1f, 1f));
+            AddChapterPortals(8, 22, 16, Teal, new Color(0.30f, 0.80f, 0.88f, 1f));
+            AddChapterPortals(12, 7, 19, Amber, new Color(0.95f, 0.58f, 0.28f, 1f));
+            AddChapterPortals(16, 37, 19, new Color(0.82f, 0.62f, 1f, 1f),
+                new Color(0.66f, 0.45f, 1f, 1f));
+            AddPortal(7, 19, Campaign.VisibleLevels, "隐藏关", "静水回声",
+                HideKelp, new Color(1f, 0.72f, 0.30f, 1f));
+        }
+
+        void AddChapterPortals(int first, int cx, int cy, Color active, Color halo)
+        {
+            AddPortal(cx - 2, cy - 1, first, (first + 1).ToString("00"),
+                Campaign.Levels[first].Name, active, halo);
+            AddPortal(cx + 2, cy - 1, first + 1, (first + 2).ToString("00"),
+                Campaign.Levels[first + 1].Name, active, halo);
+            AddPortal(cx - 2, cy + 1, first + 2, (first + 3).ToString("00"),
+                Campaign.Levels[first + 2].Name, active, halo);
+            AddPortal(cx + 2, cy + 1, first + 3, (first + 4).ToString("00"),
+                Campaign.Levels[first + 3].Name, active, halo);
         }
 
         void AddGates()
@@ -809,9 +903,115 @@ namespace WaterTurn
             if (traveling) return;
             HandleInput(dt);
             UpdateFish(dt);
+            UpdateCamera(dt);
             CheckPearlPickup();
             UpdatePrompt(dt);
         }
+
+        /// <summary>
+        /// The hub is built on a Screen Space - Overlay canvas, so the "camera"
+        /// is the map viewport: zoom in a little, follow the fish smoothly, and
+        /// clamp at the map edges so no rock-free gutter is ever visible.
+        /// </summary>
+        void UpdateCamera(float dt)
+        {
+            if (mapRoot == null) return;
+            HandleZoomInput();
+
+            cameraZoom = Mathf.Lerp(cameraZoom, zoomTarget, 1f - Mathf.Exp(-zoomSpeed * dt));
+            mapRoot.localScale = Vector3.one * cameraZoom;
+
+            Vector2 target = CameraTarget();
+            float t = 1f - Mathf.Exp(-followSpeed * dt);
+            mapRoot.anchoredPosition = Vector2.Lerp(mapRoot.anchoredPosition, target, t);
+
+            if (zoomReadout != null)
+                zoomReadout.text = "镜头 " + cameraZoom.ToString("0.00") + "×   滚轮 / + - 缩放";
+        }
+
+        void HandleZoomInput()
+        {
+            float delta = 0f;
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                float scroll = mouse.scroll.ReadValue().y;
+                if (Mathf.Abs(scroll) > .01f)
+                {
+                    float amount = Mathf.Abs(scroll) > 10f
+                        ? scroll / 120f
+                        : Mathf.Sign(scroll);
+                    delta += amount * .10f;
+                }
+            }
+
+            var keyboard = Keyboard.current;
+            if (keyboard != null)
+            {
+                if (keyboard.equalsKey.wasPressedThisFrame) delta += .10f;
+                if (keyboard.minusKey.wasPressedThisFrame) delta -= .10f;
+            }
+
+            if (Mathf.Abs(delta) <= .0001f) return;
+            zoomTarget = Mathf.Clamp(zoomTarget + delta, minZoom, maxZoom);
+            PlayerPrefs.SetFloat(ZoomKey, zoomTarget);
+            PlayerPrefs.Save();
+        }
+
+        void SnapCamera()
+        {
+            if (mapRoot == null) return;
+            cameraZoom = zoomTarget;
+            mapRoot.localScale = Vector3.one * cameraZoom;
+            mapRoot.anchoredPosition = CameraTarget();
+        }
+
+        Vector2 CameraTarget()
+        {
+            Vector2 target = -fishPos * cameraZoom + new Vector2(0f, cameraBiasY);
+            float halfW = W * Cell * cameraZoom * .5f;
+            float halfH = H * Cell * cameraZoom * .5f;
+            float maxX = Mathf.Max(0f, halfW - viewSize.x * .5f);
+            float maxY = Mathf.Max(0f, halfH - viewSize.y * .5f);
+            target.x = Mathf.Clamp(target.x, -maxX, maxX);
+            target.y = Mathf.Clamp(target.y, -maxY, maxY);
+            return target;
+        }
+
+        void OnDisable()
+        {
+            if (PlayerPrefs.GetFloat(ZoomKey, defaultZoom) != zoomTarget)
+            {
+                PlayerPrefs.SetFloat(ZoomKey, zoomTarget);
+                PlayerPrefs.Save();
+            }
+        }
+
+#if UNITY_EDITOR
+        void OnDrawGizmos()
+        {
+            // The hub map's canvas space maps 1:1 to scene units. Draw its
+            // bounds and a coarse grid so entrance anchors are easy to place.
+            Vector3 center = transform.position;
+            Gizmos.color = new Color(0.42f, 0.85f, 0.72f, 0.55f);
+            Gizmos.DrawWireCube(center, new Vector3(W * Cell, H * Cell, 0f));
+            Gizmos.color = new Color(0.42f, 0.85f, 0.72f, 0.12f);
+            for (int x = 0; x <= W; x += 5)
+            {
+                float px = center.x + (x - W * .5f) * Cell;
+                Gizmos.DrawLine(new Vector3(px, center.y - H * Cell * .5f, 0f),
+                    new Vector3(px, center.y + H * Cell * .5f, 0f));
+            }
+            for (int y = 0; y <= H; y += 5)
+            {
+                float py = center.y + (y - H * .5f) * Cell;
+                Gizmos.DrawLine(new Vector3(center.x - W * Cell * .5f, py, 0f),
+                    new Vector3(center.x + W * Cell * .5f, py, 0f));
+            }
+            UnityEditor.Handles.Label(center + new Vector3(-W * Cell * .5f, H * Cell * .5f + 20f, 0f),
+                "潮汐洞穴 · 手动入口锚点区域");
+        }
+#endif
 
         void HandleInput(float dt)
         {
@@ -905,10 +1105,10 @@ namespace WaterTurn
                 {
                     Color c = ready ? p.Active : (Color)new Color32(140, 172, 164, 255);
                     p.Label.color = c;
-                    if (p.Level == Campaign.VisibleLevels)
-                        p.Label.text = hiddenUnlocked ? "隐藏关 · 静水回声" : "隐藏关 · ???";
+                    if (p.Level >= Campaign.VisibleLevels)
+                        p.Label.text = hiddenUnlocked ? "隐藏关" : "???";
                     else
-                        p.Label.text = p.Title + " · " + p.Subtitle;
+                        p.Label.text = p.Title;
                 }
             }
         }
@@ -1006,19 +1206,57 @@ namespace WaterTurn
             return true;
         }
 
-        void ResetFish()
+        void ResetFish(int returnLevel = -1)
         {
             fishPos = CellPosition(22, 16);
+
+            // Coming out of a level should put the fish beside that level's
+            // shrine, not back in the central start pool. The shrine itself is
+            // on dry stone, so find the nearest swimmable cell to it.
+            if (returnLevel >= 0)
+            {
+                Portal from = null;
+                foreach (var p in portals)
+                {
+                    if (p.Level != returnLevel) continue;
+                    from = p;
+                    break;
+                }
+                if (from != null) fishPos = FindWaterSpawn(from.Position);
+            }
+
             fishVel = Vector2.zero;
+        }
+
+        Vector2 FindWaterSpawn(Vector2 around)
+        {
+            int cx = GridX(around.x);
+            int cy = GridY(around.y);
+            for (int radius = 0; radius <= 6; radius++)
+            {
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    for (int dx = -radius; dx <= radius; dx++)
+                    {
+                        if (radius > 0 && Mathf.Abs(dx) != radius && Mathf.Abs(dy) != radius)
+                            continue;
+                        int x = cx + dx, y = cy + dy;
+                        if (x < 0 || x >= W || y < 0 || y >= H) continue;
+                        Vector2 candidate = CellPosition(x, y);
+                        if (CanFit(candidate)) return candidate;
+                    }
+                }
+            }
+            return around;
         }
 
         // ------------------------------------------------------------ interaction
 
         bool PortalReady(Portal p)
         {
-            if (p.Level == 0) return pearlTaken;
-            if (p.Level == 1) return level1Cleared;
-            return hiddenUnlocked;
+            if (p.Level >= Campaign.VisibleLevels) return hiddenUnlocked;
+            if (!pearlTaken) return false;
+            return p.Level == 0 || GameSession.LevelsCleared >= p.Level;
         }
 
         void UpdatePrompt(float dt)
@@ -1027,7 +1265,7 @@ namespace WaterTurn
             float best = 82f;
             foreach (var p in portals)
             {
-                float d = Vector2.Distance(fishPos, CellPosition(p.X, p.Y));
+                float d = Vector2.Distance(fishPos, p.Position);
                 if (d < best) { best = d; nearest = p; }
             }
             bool show = nearest != null;
@@ -1040,10 +1278,12 @@ namespace WaterTurn
                 promptKey.color = ready ? Ink : Quiet;
                 if (ready)
                     promptText.text = "与海草共鸣 · 进入「" + nearest.Title + " · " + nearest.Subtitle + "」";
-                else if (nearest.Level == 0)
+                else if (!pearlTaken)
                     promptText.text = "沉睡的海草 · 先找到东南石室里的潮汐珍珠";
-                else
+                else if (nearest.Level >= Campaign.VisibleLevels)
                     promptText.text = "石门紧闭 · 通关第一关后才会打开";
+                else
+                    promptText.text = "潮心尚未回应 · 先通关第 " + nearest.Level.ToString("00") + " 关";
             }
         }
 
@@ -1052,9 +1292,12 @@ namespace WaterTurn
             if (nearest == null) return;
             if (!PortalReady(nearest))
             {
-                ShowToast(nearest.Level == 0
-                    ? "海草还没有回应。东南石室深处有一颗潮汐珍珠。"
-                    : "石门纹丝不动。先通关第一关，让洞穴记住你的水路。");
+                if (!pearlTaken)
+                    ShowToast("海草还没有回应。东南石室深处有一颗潮汐珍珠。");
+                else if (nearest.Level >= Campaign.VisibleLevels)
+                    ShowToast("石门纹丝不动。先通关第一关，让洞穴记住你的水路。");
+                else
+                    ShowToast("潮心还没回应。先通关第 " + nearest.Level.ToString("00") + " 关。");
                 return;
             }
             StartCoroutine(Travel(nearest));
@@ -1073,7 +1316,7 @@ namespace WaterTurn
                 fade.color = new Color(0.04f, 0.022f, 0.016f, k);
                 fishRoot.localRotation = Quaternion.Euler(0, 0, k * 460f);
                 fishRoot.localScale = Vector3.one * (1f - k * .7f);
-                fishRoot.anchoredPosition = Vector2.Lerp(fishPos, CellPosition(portal.X, portal.Y), k);
+                fishRoot.anchoredPosition = Vector2.Lerp(fishPos, portal.Position, k);
                 yield return null;
             }
             GameSession.EnterLevel(portal.Level);
@@ -1198,15 +1441,17 @@ namespace WaterTurn
             if (hiddenCleared)
                 objective.text = "隐藏关的回声已经归位。潮汐洞穴完全苏醒了。";
             else if (hiddenUnlocked)
-                objective.text = "石门已经打开。东北和西南的海草都能回应你。";
+                objective.text = "石门已经打开。按顺序挑战潮心，或进入隐藏关。";
             else if (pearlTaken)
-                objective.text = "海草醒了。去西北石室，进入第一关。";
+                objective.text = "海草醒了。去西北石室，从第一关开始。";
             else
                 objective.text = "找到沉在东南石室里的潮汐珍珠。";
 
+            int reachable = pearlTaken
+                ? Mathf.Clamp(GameSession.LevelsCleared + 1, 1, Campaign.VisibleLevels)
+                : 0;
             progress.text = Chip("潮汐珍珠", pearlTaken) + "    " +
-                             Chip("第一关", level1Cleared) + "    " +
-                             Chip("第二关", GameSession.LevelsCleared >= 2) + "    " +
+                             "<color=#7cf0dc>可达 " + reachable + " / " + Campaign.VisibleLevels + "</color>" + "    " +
                              Chip("隐藏关", hiddenCleared);
         }
 
@@ -1639,7 +1884,8 @@ namespace WaterTurn
 
         sealed class Portal
         {
-            public int Level, X, Y;
+            public int Level;
+            public Vector2 Position;
             public string Title, Subtitle;
             public RectTransform Root;
             public Image Halo, Ring, Core;
@@ -1675,8 +1921,8 @@ namespace WaterTurn
         {
             if (index < 0 || index >= portals.Count) return;
             var p = portals[index];
-            fishPos = CellPosition(p.X, p.Y) - new Vector2(Cell * 2.2f, 0);
-            if (!CanFit(fishPos)) fishPos = CellPosition(p.X, p.Y);
+            fishPos = p.Position - new Vector2(Cell * 2.2f, 0);
+            if (!CanFit(fishPos)) fishPos = p.Position;
             fishVel = Vector2.zero;
         }
 

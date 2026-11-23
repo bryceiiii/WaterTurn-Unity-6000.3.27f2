@@ -1,72 +1,109 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace WaterTurn
 {
+    /// <summary>
+    /// Runs one chamber. The board it plays on is already built in the scene from
+    /// prefab instances (see <see cref="LevelBoard"/>); this component only moves
+    /// them and drives the HUD, so the puzzle rules in <see cref="Puzzle"/> stay
+    /// untouched.
+    /// </summary>
     public sealed class WaterGame : MonoBehaviour
     {
         const string Progress = "WaterTurn.ChapterProgress.v1";
-        static readonly Color Ink = new Color32(14, 23, 30, 255);
-        static readonly Color Panel = new Color32(25, 39, 48, 255);
         static readonly Color Slate = new Color32(39, 59, 69, 255);
-        static readonly Color White = new Color32(232, 248, 241, 255);
-        static readonly Color Quiet = new Color32(156, 189, 193, 255);
         static readonly Color Teal = new Color32(120, 239, 234, 255);
         static readonly Color Amber = new Color32(255, 193, 124, 255);
-        static readonly Color Gold = new Color32(247, 212, 134, 255);
 
-        RectTransform geometry, board;
-        Font font;
-        Sprite rounded;
+        GameHud hud;
+        LevelDefinition definition;
+        LevelBoard boardView;
+        Level current;
         Sprite[] fishSwim;
         Image fishImage;
+        Sprite waterGlowSprite;
+        RectTransform waterGlowLayer;
+        Image[] waterGlows;
         float fishAnim;
         int fishFrame = -1;
         Sprite[] waterFrames, foamFrames;
-        Sprite rockSprite, woodSprite;
-        Text headline, instructions, readout, status, mechanism;
+        Sprite[][] waterVariants;
+        int[] waterMasks;
         Button next, undo, home;
         readonly List<Button> levels = new List<Button>();
         readonly Stack<Position> history = new Stack<Position>();
         RectTransform[] waters, foams;
         Image[] waterImages, foamImages;
-        RectTransform fish, crate;
+        RectTransform fish, crate, geometry;
         Image gate, pearl, sensor;
         int index, unlocked, waterFrame = -1, foamFrame = -1;
         float cell;
         bool busy, won;
         Position position;
-        Level Current => Campaign.Levels[index];
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
-            if (SceneManager.GetActiveScene().name == GameSession.HubScene) return;
+            var scene = SceneManager.GetActiveScene();
+            if (!scene.name.StartsWith("Level_")) return;
             if (FindFirstObjectByType<WaterGame>() == null)
                 new GameObject("WaterTurn").AddComponent<WaterGame>();
         }
 
         void Awake()
         {
+            definition = FindFirstObjectByType<LevelDefinition>();
+            boardView = FindFirstObjectByType<LevelBoard>();
+            hud = FindFirstObjectByType<GameHud>();
+            if (definition == null || boardView == null || hud == null)
+            {
+                Debug.LogError("WaterTurn: 关卡场景缺少 LevelDefinition / LevelBoard / GameHud，无法启动。");
+                enabled = false;
+                return;
+            }
+
             unlocked = Mathf.Clamp(PlayerPrefs.GetInt(Progress, 0), 0, Campaign.VisibleLevels - 1);
-            font = Font.CreateDynamicFontFromOSFont(new[] {"Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial"}, 28);
+            var font = Font.CreateDynamicFontFromOSFont(
+                new[] {"Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Arial"}, 28);
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            rounded = MakeRounded();
+            hud.ApplySkin(font, MakeRounded());
             fishSwim = FishArt.Swim(FishFacing.Right);
             LoadArt();
-            BuildInterface();
+            WireHud();
+            Load();
+        }
 
-            int start = GameSession.StartLevel >= 0
-                ? Mathf.Clamp(GameSession.StartLevel, 0, Campaign.Levels.Length - 1)
-                : unlocked;
-            GameSession.StartLevel = -1;
-            Load(start);
+        void WireHud()
+        {
+            home = hud.home;
+            next = hud.next;
+            undo = hud.undo;
+
+            home.onClick.AddListener(ReturnToHub);
+            next.onClick.AddListener(Advance);
+            undo.onClick.AddListener(Undo);
+            hud.restart.onClick.AddListener(Restart);
+            hud.hint.onClick.AddListener(Hint);
+            hud.up.onClick.AddListener(() => Play(Move.Up));
+            hud.down.onClick.AddListener(() => Play(Move.Down));
+            hud.left.onClick.AddListener(() => Play(Move.Left));
+            hud.right.onClick.AddListener(() => Play(Move.Right));
+            hud.turn.onClick.AddListener(() => Play(Move.Turn));
+
+            if (hud.levelButtons == null) return;
+            for (int i = 0; i < hud.levelButtons.Length; i++)
+            {
+                int target = i;
+                var button = hud.levelButtons[i];
+                if (button == null) continue;
+                levels.Add(button);
+                button.onClick.AddListener(() => LevelManager.Instance.LoadLevel(target));
+            }
         }
 
         void LoadArt()
@@ -80,6 +117,8 @@ namespace WaterTurn
             if (frames.Count == 0)
                 Debug.LogWarning("WaterTurn: 水流动画帧缺失，回退到纯色水格。");
             waterFrames = frames.ToArray();
+            BuildWaterVariants();
+            waterGlowSprite = MakeWaterGlow();
             var foam = new List<Sprite>();
             for (int i = 0; i < 8; i++)
             {
@@ -87,14 +126,135 @@ namespace WaterTurn
                 if (frame != null) foam.Add(frame);
             }
             foamFrames = foam.ToArray();
-            rockSprite = Resources.Load<Sprite>("Art/Water/rock");
-            woodSprite = Resources.Load<Sprite>("Art/Water/wood");
+        }
+
+        void BuildWaterVariants()
+        {
+            waterVariants = new Sprite[waterFrames.Length][];
+            for (int frame = 0; frame < waterFrames.Length; frame++)
+            {
+                var texture = waterFrames[frame] != null ? waterFrames[frame].texture : null;
+                if (texture == null) continue;
+                Color32[] source = texture.GetPixels32();
+                int width = texture.width;
+                int height = texture.height;
+                waterVariants[frame] = new Sprite[16];
+                for (int mask = 0; mask < 16; mask++)
+                {
+                    var edgeTexture = MakeWaterEdgeTexture(source, width, height, mask);
+                    waterVariants[frame][mask] = Sprite.Create(edgeTexture,
+                        new Rect(0, 0, 64, 64), new Vector2(.5f, .5f), 100f);
+                }
+            }
+        }
+
+        static Texture2D MakeWaterEdgeTexture(Color32[] source, int sourceWidth, int sourceHeight, int open)
+        {
+            const int size = 64;
+            const float edge = .16f;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+            var pixels = new Color32[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + .5f) / size;
+                    float v = (y + .5f) / size;
+                    float alpha = 1f;
+                    if ((open & 1) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - v) / edge));
+                    if ((open & 2) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(v / edge));
+                    if ((open & 4) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(u / edge));
+                    if ((open & 8) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - u) / edge));
+
+                    int sx = Mathf.Clamp(Mathf.FloorToInt(u * sourceWidth), 0, sourceWidth - 1);
+                    int sy = Mathf.Clamp(Mathf.FloorToInt(v * sourceHeight), 0, sourceHeight - 1);
+                    Color32 color = source[sy * sourceWidth + sx];
+                    float sourceAlpha = color.a / 255f;
+                    pixels[y * size + x] = new Color32(color.r, color.g, color.b,
+                        (byte)(Mathf.Clamp01(alpha * sourceAlpha) * 255f));
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            return texture;
+        }
+
+        int WaterMask(int index, int[] water)
+        {
+            int width = current.Width;
+            int count = current.Width * current.Height;
+            bool Has(int cell) => cell >= 0 && cell < count && System.Array.IndexOf(water, cell) >= 0;
+
+            int mask = 0;
+            if (!Has(index - width)) mask |= 1;   // open top
+            if (!Has(index + width)) mask |= 2;   // open bottom
+            if (!Has(index - 1) || index % width == 0) mask |= 4;    // open left
+            if (!Has(index + 1) || index % width == width - 1) mask |= 8; // open right
+            return mask;
+        }
+
+        void CreateWaterGlowLayer()
+        {
+            if (geometry == null || waters == null || waters.Length == 0 || waterGlowSprite == null)
+                return;
+
+            var layerObject = new GameObject("WaterGlow", typeof(RectTransform));
+            waterGlowLayer = layerObject.GetComponent<RectTransform>();
+            waterGlowLayer.SetParent(geometry, false);
+            waterGlowLayer.anchorMin = waterGlowLayer.anchorMax = new Vector2(.5f, .5f);
+            waterGlowLayer.pivot = new Vector2(.5f, .5f);
+            waterGlowLayer.sizeDelta = new Vector2(current.Width * cell, current.Height * cell);
+            waterGlowLayer.anchoredPosition = Vector2.zero;
+
+            int firstWater = int.MaxValue;
+            foreach (var water in waters)
+                if (water != null) firstWater = Mathf.Min(firstWater, water.GetSiblingIndex());
+            if (firstWater != int.MaxValue)
+                waterGlowLayer.SetSiblingIndex(firstWater);
+
+            waterGlows = new Image[waters.Length];
+            for (int i = 0; i < waters.Length; i++)
+            {
+                if (waters[i] == null) continue;
+                var glowObject = new GameObject("Glow " + i,
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                var rect = glowObject.GetComponent<RectTransform>();
+                rect.SetParent(waterGlowLayer, false);
+                rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
+                rect.pivot = new Vector2(.5f, .5f);
+                rect.sizeDelta = new Vector2(cell * 1.55f, cell * 1.55f);
+                rect.anchoredPosition = waters[i].anchoredPosition;
+
+                var image = glowObject.GetComponent<Image>();
+                image.sprite = waterGlowSprite;
+                image.color = new Color(0.10f, 0.82f, 0.88f, 0.10f);
+                image.raycastTarget = false;
+                waterGlows[i] = image;
+            }
         }
 
         void AnimateWater()
         {
             int tick = Mathf.FloorToInt(Time.unscaledTime * 7f);
-            if (waterFrames.Length > 0 && waterImages != null && tick % waterFrames.Length != waterFrame)
+            if (waterVariants != null && waterVariants.Length > 0 && waterMasks != null &&
+                waterImages != null)
+            {
+                waterFrame = tick % waterVariants.Length;
+                var variants = waterVariants[waterFrame];
+                for (int i = 0; i < waterImages.Length; i++)
+                {
+                    if (waterImages[i] == null) continue;
+                    int mask = i < waterMasks.Length ? waterMasks[i] : 0;
+                    var sprite = variants != null && mask >= 0 && mask < variants.Length
+                        ? variants[mask] : null;
+                    if (sprite != null) waterImages[i].sprite = sprite;
+                }
+            }
+            else if (waterFrames.Length > 0 && waterImages != null && tick % waterFrames.Length != waterFrame)
             {
                 waterFrame = tick % waterFrames.Length;
                 for (int i = 0; i < waterImages.Length; i++)
@@ -127,7 +287,7 @@ namespace WaterTurn
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
             if (keyboard.escapeKey.wasPressedThisFrame) { ReturnToHub(); return; }
-            if (keyboard.rKey.wasPressedThisFrame) { Load(index); return; }
+            if (keyboard.rKey.wasPressedThisFrame) { Restart(); return; }
             if (keyboard.zKey.wasPressedThisFrame) { Undo(); return; }
             if (keyboard.hKey.wasPressedThisFrame) { Hint(); return; }
             if (won && keyboard.enterKey.wasPressedThisFrame)
@@ -143,168 +303,76 @@ namespace WaterTurn
             else if (keyboard.leftArrowKey.wasPressedThisFrame || keyboard.aKey.wasPressedThisFrame) Play(Move.Left);
         }
 
-        void BuildInterface()
+        /// <summary>Bind the puzzle to the board that is already in the scene.</summary>
+        void Load()
         {
-            var root = NewRect("GameCanvas", null);
-            root.SetParent(transform, false);
-            var canvas = root.gameObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scale = root.gameObject.AddComponent<CanvasScaler>();
-            scale.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scale.referenceResolution = new Vector2(1280, 800);
-            scale.matchWidthOrHeight = .5f;
-            root.gameObject.AddComponent<GraphicRaycaster>();
-            if (FindFirstObjectByType<EventSystem>() == null)
-                new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
-
-            var bk = ImageOn(root, "Backdrop", Ink, null);
-            bk.rectTransform.anchorMin = Vector2.zero;
-            bk.rectTransform.anchorMax = Vector2.one;
-            bk.rectTransform.offsetMin = bk.rectTransform.offsetMax = Vector2.zero;
-            var stage = Place(root, "Layout", 0, 0, 1280, 800);
-            Label(stage, "借水过河", 58, -49, 545, 67, 49, White, FontStyle.Bold);
-            Label(stage, "GRID PUZZLE  /  TTURN", 58, -113, 545, 30, 17, Teal, FontStyle.Bold);
-            home = Control(stage, "回洞穴  Esc", 1108, -45, 120, 38, ReturnToHub, false, 15);
-            PanelAt(stage, "BoardFrame", 57, -157, 694, 594);
-            PanelAt(stage, "ControlPanel", 774, -157, 450, 594);
-            board = Place(stage, "BoardCenter", 404, -452, 0, 0);
-            Label(stage, "重力  ↓", 635, -171, 104, 27, 17, Quiet);
-
-            headline = Label(stage, "", 800, -181, 400, 45, 28, White, FontStyle.Bold);
-            instructions = Label(stage, "", 800, -230, 391, 61, 18, Quiet);
-            mechanism = Label(stage, "", 800, -295, 394, 71, 16, Teal);
-            status = Label(stage, "", 800, -371, 389, 63, 19, Amber);
-            readout = Label(stage, "", 800, -437, 380, 32, 16, Quiet);
-
-            Control(stage, "↑", 868, -480, 52, 42, () => Play(Move.Up));
-            Control(stage, "←", 812, -526, 52, 42, () => Play(Move.Left));
-            Control(stage, "↓", 868, -526, 52, 42, () => Play(Move.Down));
-            Control(stage, "→", 924, -526, 52, 42, () => Play(Move.Right));
-            Control(stage, "转房间  /  空格", 992, -493, 205, 62, () => Play(Move.Turn), true);
-            undo = Control(stage, "撤销 Z", 800, -586, 96, 40, Undo);
-            Control(stage, "重来 R", 902, -586, 96, 40, () => Load(index));
-            Control(stage, "提示 H", 1004, -586, 96, 40, Hint);
-            next = Control(stage, "下一关 ↵", 1105, -586, 99, 40, Advance, true);
-            Label(stage, "关卡  ·  通关后解锁下一关", 800, -638, 390, 25, 16, Quiet);
-            for (int i = 0; i < Campaign.VisibleLevels; i++)
-            {
-                int target = i;
-                levels.Add(Control(stage, (i + 1).ToString("00"), 800 + (i % 10) * 40, -665 - (i / 10) * 34, 36, 30,
-                    () => Load(target), false, 16));
-            }
-        }
-
-        void Load(int target)
-        {
-            if (index != target) GameSession.LastCompletedLevel = -1;
-            StopAllCoroutines();
-            index = target;
+            current = definition.ToLevel();
+            index = definition.levelIndex;
             history.Clear();
             busy = won = false;
-            position = Puzzle.Begin(Current);
-            headline.text = index >= Campaign.VisibleLevels
-                ? "EX  " + Current.Name
-                : (index + 1).ToString("00") + "  " + Current.Name;
-            instructions.text = Current.Hint;
-            if (geometry != null)
+            position = Puzzle.Begin(current);
+
+            SetHeader();
+            if (position == null)
             {
-                geometry.gameObject.SetActive(false);
-                Destroy(geometry.gameObject);
+                Debug.LogError("WaterTurn: 关卡数据无效 —— " + definition.levelName);
+                return;
             }
-            geometry = NewRect("Room", board);
-            cell = Mathf.Min(100, 510 / Mathf.Sqrt(Current.Width * Current.Width + Current.Height * Current.Height));
-            gate = pearl = sensor = null;
-            for (int p = 0; p < Current.Tiles.Length; p++)
-            {
-                char tile = Current.Tiles[p];
-                if (tile == '#')
-                {
-                    Cell("Tile " + p, p, cell + 1, new Color32(32, 42, 52, 255));
-                    if (rockSprite != null) Cell("Rock " + p, p, cell, new Color32(188, 202, 232, 255), rockSprite);
-                }
-                else
-                    Cell("Tile " + p, p, cell - 2, new Color32(16, 29, 38, 255));
-                if (tile == 'E')
-                {
-                    var exitTile = Cell("Exit", p, cell * .78f, new Color32(196, 148, 82, 255));
-                    var hole = ImageOn(exitTile, "Exit Hole", new Color32(26, 34, 44, 255), rounded).rectTransform;
-                    hole.sizeDelta = new Vector2(cell * .40f, cell * .40f);
-                }
-                if (tile == 'D') gate = Cell("Gate", p, cell - 12, Amber).GetComponent<Image>();
-                if (tile == 'S') sensor = Cell("Sensor", p, cell * .54f, Teal).GetComponent<Image>();
-                if (tile == 'K') pearl = Cell("Pearl", p, cell * .32f, Gold).GetComponent<Image>();
-            }
-            waterFrame = foamFrame = -1;
-            if (foamFrames.Length > 0)
-            {
-                float foamSize = (cell + 2) * 1.5f;
-                foams = new RectTransform[position.Water.Length];
-                foamImages = new Image[foams.Length];
-                for (int i = 0; i < foams.Length; i++)
-                {
-                    var rt = ImageOn(geometry, "Foam " + i, Color.white, foamFrames[0]).rectTransform;
-                    rt.sizeDelta = new Vector2(foamSize, foamSize);
-                    rt.anchoredPosition = Point(position.Water[i]);
-                    foams[i] = rt;
-                    foamImages[i] = rt.GetComponent<Image>();
-                }
-            }
-            else
-            {
-                foams = new RectTransform[0];
-                foamImages = new Image[0];
-            }
-            waters = new RectTransform[position.Water.Length];
+
+            geometry = boardView.room;
+            cell = boardView.cell;
+            waters = boardView.water ?? new RectTransform[0];
+            foams = boardView.foam ?? new RectTransform[0];
+            waterMasks = new int[waters.Length];
             waterImages = new Image[waters.Length];
-            waterFrame = -1;
-            bool artWater = waterFrames.Length > 0;
             for (int i = 0; i < waters.Length; i++)
             {
-                waters[i] = artWater
-                    ? Cell("Water " + i, position.Water[i], cell + 2, Color.white, waterFrames[0])
-                    : Cell("Water " + i, position.Water[i], cell - 11, new Color32(48, 166, 180, 220));
                 waterImages[i] = waters[i].GetComponent<Image>();
+                if (waterImages[i] != null)
+                    waterImages[i].color = new Color(0.88f, 0.98f, 0.99f, 0.94f);
             }
-            for (int p = 0; p < Current.Tiles.Length; p++)
+            foamImages = new Image[foams.Length];
+            for (int i = 0; i < foams.Length; i++)
             {
-                if (Current.Tiles[p] != 'G') continue;
-                var grate = Cell("Fish grate", p, cell * .75f, new Color32(101, 122, 140, 160));
-                for (int i = -1; i <= 1; i++)
-                {
-                    var bar = ImageOn(grate, "Grate Bar", Quiet, rounded).rectTransform;
-                    bar.sizeDelta = new Vector2(4, cell * .65f);
-                    bar.anchoredPosition = new Vector2(i * cell * .18f, 0);
-                }
+                foamImages[i] = foams[i].GetComponent<Image>();
+                // The old foam frame was a full 153px rounded square around
+                // every single water cell, so adjacent cells showed a white
+                // lattice and each splash overlapped its neighbours. The water
+                // itself is a seamless tile; keep the surface clean and let the
+                // animated water texture carry the motion.
+                if (foams[i] != null) foams[i].gameObject.SetActive(false);
             }
-            if (position.Box >= 0)
-            {
-                crate = woodSprite == null
-                    ? Cell("Crate", position.Box, cell * .61f, new Color32(166, 108, 67, 255))
-                    : Cell("Crate", position.Box, cell * .84f, Color.white, woodSprite);
-                if (woodSprite == null)
-                {
-                    var brace = ImageOn(crate, "Crate Brace", Amber, rounded).rectTransform;
-                    brace.sizeDelta = new Vector2(cell * .57f, 5);
-                    brace.localRotation = Quaternion.Euler(0, 0, 45);
-                }
-            }
-            else crate = null;
-            fish = Cell("Fish", position.Fish, cell * .68f, White,
-                fishSwim != null && fishSwim.Length > 0 ? fishSwim[0] : null);
-            fishImage = fish.GetComponent<Image>();
-            fishImage.preserveAspect = true;
+            CreateWaterGlowLayer();
+
+            fish = boardView.player;
+            fishImage = fish != null ? fish.GetComponent<Image>() : null;
+            crate = boardView.crate;
+            gate = boardView.gate;
+            pearl = boardView.pearl;
+            sensor = boardView.sensor;
+            if (fishImage != null) fishImage.preserveAspect = true;
+
+            waterFrame = foamFrame = -1;
             Paint(position, position, position.Turn * 90f, 1);
-            status.text = "把鱼送到金色出口。";
+            hud.status.text = "把鱼送到金色出口。";
             Refresh();
+        }
+
+        void SetHeader()
+        {
+            hud.headline.text = index >= Campaign.VisibleLevels
+                ? "EX  " + current.Name
+                : (index + 1).ToString("00") + "  " + current.Name;
+            hud.instructions.text = current.Hint;
         }
 
         void Play(Move move)
         {
-            if (won || busy) return;
-            Position result = Puzzle.Apply(Current, position, move, out Block block);
+            if (won || busy || position == null) return;
+            Position result = Puzzle.Apply(current, position, move, out Block block);
             if (result == null)
             {
-                status.text = block == Block.Grate ? "这一步会让鱼穿过栅栏。换一格水再试。" :
+                hud.status.text = block == Block.Grate ? "这一步会让鱼穿过栅栏。换一格水再试。" :
                     block == Block.Crate ? "箱子前面没有可以推入的位置。" : "鱼只能进入相邻的水格。";
                 return;
             }
@@ -332,7 +400,7 @@ namespace WaterTurn
             }
             history.Push(source);
             position = result;
-            won = Puzzle.Won(Current, result);
+            won = Puzzle.Won(current, result);
             busy = false;
             if (won)
             {
@@ -345,17 +413,17 @@ namespace WaterTurn
                 if (index >= Campaign.VisibleLevels)
                     PlayerPrefs.SetInt(GameSession.HiddenClearedKey, 1);
                 PlayerPrefs.Save();
-                status.text = index >= Campaign.VisibleLevels
+                hud.status.text = index >= Campaign.VisibleLevels
                     ? "隐藏关完成！回声沉入水底。按 Esc 回到潮汐洞穴。"
                     : index == Campaign.VisibleLevels - 1
                         ? "通关！全部二十关已完成。按 Esc 回到潮汐洞穴。"
                         : "到达出口，已解锁下一关。按 Esc 回到潮汐洞穴。";
             }
             else
-                status.text =
+                hud.status.text =
                     !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
                     !source.Gate && result.Gate ? "感应格进水，闸门已打开。" :
-                    result.Fish == Current.Exit ? "先收集珍珠，出口才会开启。" :
+                    result.Fish == current.Exit ? "先收集珍珠，出口才会开启。" :
                     source.Box != result.Box ? "箱子已移位，留意新的水路。" : "水已落定。";
             if (won && index == unlocked && index < Campaign.VisibleLevels - 1)
             {
@@ -369,16 +437,23 @@ namespace WaterTurn
 
         void Paint(Position source, Position target, float angle, float fraction)
         {
-            geometry.localRotation = Quaternion.Euler(0, 0, -angle);
+            if (geometry != null) geometry.localRotation = Quaternion.Euler(0, 0, -angle);
             for (int i = 0; i < waters.Length; i++)
             {
                 waters[i].anchoredPosition = Vector2.Lerp(Point(source.Water[i]), Point(target.Water[i]), fraction);
+                if (waterMasks != null && i < waterMasks.Length)
+                    waterMasks[i] = WaterMask(target.Water[i], target.Water);
                 if (i < foams.Length) foams[i].anchoredPosition = waters[i].anchoredPosition;
+                if (waterGlows != null && i < waterGlows.Length && waterGlows[i] != null)
+                    waterGlows[i].rectTransform.anchoredPosition = waters[i].anchoredPosition;
             }
-            if (crate != null)
+            if (crate != null && source.Box >= 0 && target.Box >= 0)
                 crate.anchoredPosition = Vector2.Lerp(Point(source.Box), Point(target.Box), fraction);
-            fish.anchoredPosition = Vector2.Lerp(Point(source.Fish), Point(target.Fish), fraction);
-            fish.localRotation = Quaternion.Euler(0, 0, angle);
+            if (fish != null)
+            {
+                fish.anchoredPosition = Vector2.Lerp(Point(source.Fish), Point(target.Fish), fraction);
+                fish.localRotation = Quaternion.Euler(0, 0, angle);
+            }
             if (gate != null) gate.color = target.Gate ? new Color32(255, 193, 124, 53) : Amber;
             if (sensor != null) sensor.color = target.Gate ? Teal : new Color32(55, 120, 124, 255);
             if (pearl != null) pearl.enabled = !target.Pearl;
@@ -386,12 +461,12 @@ namespace WaterTurn
 
         void Refresh()
         {
-            string gateState = Current.Sensor < 0 ? "" : "   ·   闸门" + (position.Gate ? "开" : "关");
-            string pearlState = Current.Pearl < 0 ? "" : "   ·   珍珠 " + (position.Pearl ? "1 / 1" : "0 / 1");
-            readout.text = "步数 " + history.Count + gateState + pearlState;
-            mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
-                (Current.Sensor < 0 ? "" : "   ·   青色为感应格") +
-                (Current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
+            string gateState = current.Sensor < 0 ? "" : "   ·   闸门" + (position.Gate ? "开" : "关");
+            string pearlState = current.Pearl < 0 ? "" : "   ·   珍珠 " + (position.Pearl ? "1 / 1" : "0 / 1");
+            hud.readout.text = "步数 " + history.Count + gateState + pearlState;
+            hud.mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
+                (current.Sensor < 0 ? "" : "   ·   青色为感应格") +
+                (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
             next.gameObject.SetActive(won && index + 1 < Campaign.VisibleLevels);
             for (int i = 0; i < levels.Count; i++)
@@ -403,12 +478,19 @@ namespace WaterTurn
 
         void Advance()
         {
-            if (won && index + 1 < Campaign.VisibleLevels) Load(index + 1);
+            if (!won || index + 1 >= Campaign.VisibleLevels) return;
+            LevelManager.Instance.LoadLevel(index + 1);
+        }
+
+        void Restart()
+        {
+            if (LevelManager.Instance != null) LevelManager.Instance.RestartLevel();
+            else Load();
         }
 
         void ReturnToHub()
         {
-            GameSession.EnterHub();
+            GameSession.EnterHub(index);
         }
 
 #if UNITY_EDITOR
@@ -432,7 +514,7 @@ namespace WaterTurn
             if (busy || history.Count == 0) return;
             position = history.Pop();
             won = false;
-            status.text = "已恢复到上一步。";
+            hud.status.text = "已恢复到上一步。";
             Paint(position, position, position.Turn * 90f, 1);
             Refresh();
         }
@@ -440,92 +522,36 @@ namespace WaterTurn
         void Hint()
         {
             if (busy || won) return;
-            string route = Puzzle.Solve(Current, position);
-            status.text = route == null ? "这个局面走不到出口。撤销一步，试试另一条路线。" :
+            string route = Puzzle.Solve(current, position);
+            hud.status.text = route == null ? "这个局面走不到出口。撤销一步，试试另一条路线。" :
                 "下一步可以" + new[] {"向上游。","向右游。","向下游。","向左游。","转动房间。"}[route[0] - '0'];
         }
 
-        Vector2 Point(int p) => new Vector2((p % Current.Width - (Current.Width - 1) * .5f) * cell,
-            ((Current.Height - 1) * .5f - p / Current.Width) * cell);
+        Vector2 Point(int p) => new Vector2((p % current.Width - (current.Width - 1) * .5f) * cell,
+            ((current.Height - 1) * .5f - p / current.Width) * cell);
 
-        RectTransform Cell(string name, int p, float size, Color color, Sprite sprite = null)
+        static Sprite MakeWaterGlow()
         {
-            var rt = ImageOn(geometry, name, color, sprite == null ? rounded : sprite).rectTransform;
-            rt.sizeDelta = new Vector2(size, size);
-            rt.anchoredPosition = Point(p);
-            return rt;
-        }
-
-        static RectTransform NewRect(string name, RectTransform parent)
-        {
-            var rt = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
-            if (parent != null) rt.SetParent(parent, false);
-            return rt;
-        }
-
-        static RectTransform Place(RectTransform parent, string name, float x, float y, float w, float h)
-        {
-            var rt = NewRect(name, parent);
-            if (name == "Layout")
+            const int size = 64;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+            var colors = new Color32[size * size];
+            for (int y = 0; y < size; y++)
             {
-                rt.sizeDelta = new Vector2(w, h);
-                return rt;
+                for (int x = 0; x < size; x++)
+                {
+                    float nx = (x + .5f) / size * 2f - 1f;
+                    float ny = (y + .5f) / size * 2f - 1f;
+                    float distance = Mathf.Sqrt(nx * nx + ny * ny);
+                    float alpha = Mathf.Clamp01(1f - distance);
+                    alpha = alpha * alpha * (3f - 2f * alpha);
+                    colors[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
             }
-            rt.anchorMin = rt.anchorMax = new Vector2(0, 1);
-            rt.pivot = new Vector2(0, 1);
-            rt.anchoredPosition = new Vector2(x, y);
-            rt.sizeDelta = new Vector2(w, h);
-            return rt;
-        }
-
-        static Image ImageOn(RectTransform parent, string name, Color color, Sprite sprite)
-        {
-            var image = NewRect(name, parent).gameObject.AddComponent<Image>();
-            image.color = color;
-            image.sprite = sprite;
-            image.raycastTarget = false;
-            return image;
-        }
-
-        void PanelAt(RectTransform parent, string name, float x, float y, float w, float h)
-        {
-            var image = Place(parent, name, x, y, w, h).gameObject.AddComponent<Image>();
-            image.color = Panel;
-            image.sprite = rounded;
-            image.type = Image.Type.Sliced;
-            image.raycastTarget = false;
-        }
-
-        Text Label(RectTransform parent, string content, float x, float y, float w, float h, int size, Color color,
-            FontStyle style = FontStyle.Normal)
-        {
-            var text = Place(parent, content == "" ? "Text" : content, x, y, w, h).gameObject.AddComponent<Text>();
-            text.font = font;
-            text.text = content;
-            text.fontSize = size;
-            text.color = color;
-            text.fontStyle = style;
-            text.raycastTarget = false;
-            return text;
-        }
-
-        Button Control(RectTransform parent, string title, float x, float y, float w, float h,
-            UnityEngine.Events.UnityAction action, bool accent = false, int size = 17)
-        {
-            var rect = Place(parent, title, x, y, w, h);
-            var image = rect.gameObject.AddComponent<Image>();
-            image.sprite = rounded;
-            image.type = Image.Type.Sliced;
-            image.color = accent ? Teal : Slate;
-            var button = rect.gameObject.AddComponent<Button>();
-            button.targetGraphic = image;
-            var nav = button.navigation;
-            nav.mode = Navigation.Mode.None;
-            button.navigation = nav;
-            var label = Label(rect, title, 0, 0, w, h, size, accent ? Ink : White, FontStyle.Bold);
-            label.alignment = TextAnchor.MiddleCenter;
-            button.onClick.AddListener(action);
-            return button;
+            texture.SetPixels32(colors);
+            texture.Apply();
+            return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(.5f, .5f), 100f);
         }
 
         static Sprite MakeRounded()

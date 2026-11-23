@@ -17,10 +17,12 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 `Assets/Scenes/WaterTurnHub.unity` 是新的初始场景，也是一个很短的探索关：
 
 - 一座被海水淹没的旧矿道：五个石室由蜿蜒的两格宽水渠相连，周围还有干涸的侧道、岩洞和碎石。小鱼只能在水里游，干燥的洞底只是布景。
+- 五座石室每座四面各有一个潮心，共 **20 个关卡入口（01–20）**；潮心按通关进度逐个点亮，不再只有三个入口。右上角的“关卡 x / 20”显示当前可达数量。
 - 潮汐珍珠沉在东南石室。游过去碰到它，西北石室的“第一关”潮心才会苏醒。
-- 游到发光海草旁按 E / 空格，海草会把小鱼送进对应的关卡。第一关永远开放；第二关的石门要等第一关通关后才打开。
-- 第一关通关后，东北（第二关）和西南（隐藏关）两扇石门同时打开。隐藏关是第 21 张地图“静水回声”，不在 20 关的编号列表里，只能从洞穴进入。
-- 关卡结算后按 Esc 或点“回洞穴”回到序章；进度、珍珠和石门状态都存在 PlayerPrefs 里。
+- 镜头会平滑跟随小鱼：默认 1.2 倍，可用鼠标滚轮或 `+` / `-` 在 1.06–2.2 倍之间缩放；靠近地图边缘时自动停住，不会露出地图外的空白。
+- 游到发光海草旁按 E / 空格，海草会把小鱼送进对应的关卡。第一关需要珍珠唤醒；之后按 01→20 的顺序逐个解锁。
+- 第一关通关后，东北、西南两扇石门同时打开，露出第 5–8 关与第 13–16 关的潮心；隐藏关“静水回声”也在这时开启。它是第 21 张地图，不在 20 关的编号列表里，只能从洞穴进入。
+- 关卡结算后按 Esc 或点“回洞穴”回到序章；小鱼会从**刚才那一关的潮心旁边**游出来，而不是回到中央起点。进度、珍珠和石门状态都存在 PlayerPrefs 里。
 
 洞穴美术使用了以下免费像素素材，具体许可见 `Assets/Resources/Art/Cave/CREDITS.md`：
 
@@ -37,6 +39,13 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 - `Assets/Resources/Art/Fish/Jump/jump_{right,left,up,down}_0..3.png` · 跳跃四段（100 / 70 / 130 / 90 ms），已导入备用，暂时没有接进玩法。
 - 导入规则沿用 `Assets/Editor/PixelArtImport.cs`：Point 过滤、无压缩、16 PPU、Center 轴心、48×48 不裁边，因此每帧重心一致，切换方向不会跳。
 - 换素材时保持 48×48 画布、文件名不变即可，`Assets/WaterTurn/FishArt.cs` 会按名字加载。
+
+## 关卡水面
+
+- 关卡里的水格不再给每一格套一张 153px 的方形水花贴图；连续水体现在按四方向邻接自动拼接。
+- 水块的外露边缘用 alpha 渐变柔化，外角自然收圆；内部相邻水格之间没有接缝或方框。
+- 水格仍是整格碰撞判定，鱼可以游到视觉边缘附近；外圈只保留很淡的水光。
+- 水流帧动画保留，但不再有每格重复、互相叠压的白色水花。
 
 ## 连锁关卡
 
@@ -66,10 +75,25 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 
 章节起点 01、06、10、14、18 分别引入换水、木箱、栅栏、水压闸门、珍珠。每个章节的第一关先让玩家辨认新规则，接着用分流、借另一股水完成任务、回到先前水道等组合推进。20 关要求让箱子、鱼、先到感应格的水各履其职。第 21 关是洞穴隐藏关，不参与编号解锁。
 
+## 手动调整大厅
+
+大厅的入口和镜头现在可以在 Unity 里直接调，不必改代码：
+
+- **拖动关卡入口**：打开 `WaterTurnHub`，在 Hierarchy 里展开 `TidalHollow/Level Entrances`。`Portal 01` … `Portal 20`、`Hidden Portal` 都是可拖动的空物体，Scene 视图里会显示编号、关卡名和潮心颜色。移动后重新 Play，潮心会出现在新位置。
+- **改入口信息**：选中锚点，在 Inspector 的 `HubPortalAnchor` 上改 `level`、`title`、`subtitle`、`activeColor`、`haloColor`、`compact`；`title/subtitle` 留空会自动读取关卡编号和 `Campaign` 关名。
+- **重建设置**：菜单 `WaterTurn/Hub/创建关卡入口锚点`、`重置入口锚点位置`、`删除关卡入口锚点`。入口全部删掉时，`HubGame` 会退回代码里的默认布局。
+- **镜头参数**：选中 `TidalHollow` 的 `HubGame`，在 Inspector 的 `Camera Authoring` 里调 `defaultZoom`、`minZoom`、`maxZoom`、`cameraBiasY`、`followSpeed`、`zoomSpeed`、`viewSize`。
+- **场景辅助线**：`HubGame` 和每个 `HubPortalAnchor` 都带 Gizmos；Scene 视图会画出 1260×756 的地图范围和粗网格，方便把锚点对到石室/水渠上。
+- 入口锚点是在 Play 开始时读取的，所以改完位置后要重新进入 Play；镜头参数在 Play 中改 `cameraBiasY`/`followSpeed` 等会立即生效。
+
+当前岩石、水渠和装饰仍是程序化生成；如果要把它们也变成可在 Scene 里逐个拖动的美术对象，可以在此基础上继续做“烘焙”。
+
 ## 工程入口
 
 - `Assets/WaterTurn/HubGame.cs` · 序章洞穴：程序化绘制的水潭、岩石、海草传送门、石门和可自由游动的小鱼（精灵来自 `Art/Fish`）。
 - `Assets/WaterTurn/FishArt.cs` · 小鱼四方向游动帧的加载、帧计时和朝向判定；跳跃帧已导入但未接入。
+- `Assets/WaterTurn/HubPortalAnchor.cs` · 可拖动的关卡入口锚点；Scene 视图 Gizmos 显示编号、关名和颜色。
+- `Assets/Editor/HubAuthoringTools.cs` · 创建/重置/删除入口锚点的编辑器菜单。
 - `Assets/WaterTurn/GameSession.cs` · 洞穴与关卡场景之间的关卡选择、回程和隐藏关进度的静态桥。
 - `Assets/WaterTurn/Puzzle.cs` · 可复现的格子模拟和提示求解器。
 - `Assets/WaterTurn/Campaign.cs` · 二十张编号地图、一张隐藏地图、关名和提示。
