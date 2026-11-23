@@ -22,7 +22,7 @@ namespace WaterTurn
     {
         const int W = 45, H = 27;
         const float Cell = 28f;
-        const float FishRadius = 10.5f;
+        const float FishRadius = 9.5f;
         const float SwimSpeed = 148f;
         const float SwimAcceleration = 900f;
         const float SwimDrag = 700f;
@@ -44,36 +44,7 @@ namespace WaterTurn
         const string ZoomKey = "WaterTurn.HubZoom.v1";
         float cameraZoom, zoomTarget;
 
-        static readonly string[] Map =
-        {
-            "#############################################",
-            "#############################################",
-            "#############################################",
-            "#############################################",
-            "#############################################",
-            "#############################################",
-            "#########.......................#############",
-            "####............................##.......####",
-            "####..#~~..#######..##############..#~~..####",
-            "####..~1~..#######..##############..~2~..####",
-            "####..~~#~~~~~~~~#..##############..~~#..#..#",
-            "####...~~~~~~~~~~#......########~~~~~~...#..#",
-            "####..#########~~#......########gg~~~~##....#",
-            "####..#######..~~~~~~~~~########gg######....#",
-            "####...######..~~~~~~~~~..##~~~~~~########..#",
-            "####...######..####..#~~..##~~~~~#########..#",
-            "#############..####..~@~~~~~~~############..#",
-            "####.......########..~~#~~~~~#####..........#",
-            "####..#~~..####~~~~~~~~~~~~~~~~~##..#~~....##",
-            "####..~H~..####xx~~~~~~~~~~~~~~~....~K~..####",
-            "####..~~~..####xx#############~~....~~~..####",
-            "####...~~~~~~~~~~#############~~~~~~~~...####",
-            "#######~~~~~~~~~##############~~~~~~~~#######",
-            "#######################################.....#",
-            "#######################################.....#",
-            "#############..###############..............#",
-            "#############..............................##",
-        };
+        HubPuzzle puzzle;
 
         static readonly Color Ink = new Color32(20, 12, 13, 255);
         static readonly Color Panel = new Color32(30, 20, 19, 238);
@@ -98,10 +69,24 @@ namespace WaterTurn
 
         RectTransform canvasRoot, mapRoot, fishRoot, fishImage, pearlRoot, promptRoot, toastRoot;
         Image fade, pearlGlow, fishGlow, tunnelImage, fishSpriteImage;
-        Texture2D[] tunnelTextures;
-        Sprite[] tunnelSprites;
-        Text objective, progress, promptText, promptKey, toastText, zoomReadout;
+        Sprite[][] waterTileVariants;
+        int waterTileFrame = -1;
+        Text objective, progress, promptText, promptKey, toastText, zoomReadout, statusText;
         CanvasGroup promptGroup, toastGroup;
+
+        RectTransform waterRoot, valveRoot;
+        readonly List<WaterTile> waterTiles = new List<WaterTile>();
+        readonly List<ValveView> valveViews = new List<ValveView>();
+        readonly bool[,] reachable = new bool[W, H];
+        ValveView hoveredValve, keyboardValve, focusedValve, hintValve;
+        float hintTimer;
+        int turnCount;
+        readonly Stack<HubSnapshot> undoStack = new Stack<HubSnapshot>();
+        float valveClock;
+        float valveRotateDuration = .30f;
+        bool rotatingValve;
+        readonly List<RaycastResult> pointerHits = new List<RaycastResult>();
+        PointerEventData pointerEvent;
 
         readonly List<Portal> portals = new List<Portal>();
         readonly List<Gate> gates = new List<Gate>();
@@ -115,7 +100,6 @@ namespace WaterTurn
         bool justCompletedFirst, gatesStartOpen;
         float toastTimer, promptAlpha;
         Portal nearest;
-        int waterFrame = -1;
         float swayClock;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -140,15 +124,24 @@ namespace WaterTurn
             int returnLevel = GameSession.ReturnLevel;
             GameSession.ReturnLevel = -1;
             gatesStartOpen = level1Cleared && !justCompletedFirst;
+            puzzle = new HubPuzzle();
             BuildArt();
             BuildInterface();
             BuildMap();
             ResetFish(returnLevel);
+            RefreshWaterTiles();
             SnapCamera();
             RefreshHud();
             StartCoroutine(FadeInRoutine());
             if (justCompletedFirst) StartCoroutine(RevealDoorsOnReturn());
             else if (justCompletedHidden) StartCoroutine(ShowHiddenReturn());
+            else StartCoroutine(ShowPuzzleIntro());
+        }
+
+        IEnumerator ShowPuzzleIntro()
+        {
+            yield return new WaitForSeconds(1.0f);
+            ShowToast("鼠标指向水块按 Space（或左键）转 90°   ·   Z 撤销   ·   H 提示   ·   R 重开", 5.2f);
         }
 
         // ------------------------------------------------------------------ art
@@ -189,6 +182,64 @@ namespace WaterTurn
                 if (frame != null) water.Add(frame);
             }
             waterFrames = water.ToArray();
+            BuildWaterTileVariants();
+        }
+
+        /// <summary>
+        /// One sprite per animation frame and per open-edge mask.  The water is
+        /// drawn as separate tiles now, so a water block can turn without the
+        /// whole cave texture being rebuilt.
+        /// </summary>
+        void BuildWaterTileVariants()
+        {
+            waterTileVariants = new Sprite[waterFrames.Length][];
+            for (int frame = 0; frame < waterFrames.Length; frame++)
+            {
+                var sprite = waterFrames[frame];
+                var texture = sprite != null ? sprite.texture : null;
+                if (texture == null) continue;
+                Color32[] source = texture.GetPixels32();
+                int width = texture.width;
+                int height = texture.height;
+                var variants = new Sprite[16];
+                for (int mask = 0; mask < 16; mask++)
+                    variants[mask] = MakeWaterTile(source, width, height, mask);
+                waterTileVariants[frame] = variants;
+            }
+        }
+
+        static Sprite MakeWaterTile(Color32[] source, int sourceWidth, int sourceHeight, int open)
+        {
+            const int size = 64;
+            const float edge = .20f;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + .5f) / size;
+                    float v = (y + .5f) / size;
+                    float alpha = 1f;
+                    if ((open & 1) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - v) / edge));
+                    if ((open & 2) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(v / edge));
+                    if ((open & 4) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(u / edge));
+                    if ((open & 8) != 0) alpha *= Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - u) / edge));
+
+                    int sx = Mathf.Clamp(Mathf.FloorToInt(u * sourceWidth), 0, sourceWidth - 1);
+                    int sy = Mathf.Clamp(Mathf.FloorToInt(v * sourceHeight), 0, sourceHeight - 1);
+                    Color32 color = source[sy * sourceWidth + sx];
+                    pixels[y * size + x] = new Color32(color.r, color.g, color.b,
+                        (byte)(Mathf.Clamp01(alpha * (color.a / 255f)) * 255f));
+                }
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(.5f, .5f), 100f);
         }
 
         // ------------------------------------------------------------- interface
@@ -207,7 +258,9 @@ namespace WaterTurn
                 new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
 
             var backdrop = Stretch(canvasRoot, "Backdrop");
-            backdrop.gameObject.AddComponent<Image>().color = new Color32(10, 6, 5, 255);
+            var backdropImage = backdrop.gameObject.AddComponent<Image>();
+            backdropImage.color = new Color32(10, 6, 5, 255);
+            backdropImage.raycastTarget = false;
 
             var frame = Box(canvasRoot, "CaveFrame", Vector2.zero, new Vector2(W * Cell + 12, H * Cell + 12), Center);
             var frameImage = frame.gameObject.AddComponent<Image>();
@@ -235,7 +288,13 @@ namespace WaterTurn
                 shaft.rectTransform.localRotation = Quaternion.Euler(0, 0, -12 + i * 5);
             }
             var tint = Stretch(ambient, "WaterTint");
-            tint.gameObject.AddComponent<Image>().color = new Color(0.28f, 0.12f, 0.05f, 0.06f);
+            var tintImage = tint.gameObject.AddComponent<Image>();
+            tintImage.color = new Color(0.28f, 0.12f, 0.05f, 0.06f);
+            // This layer sits above the map and covers the whole screen, so it
+            // must not eat raycasts: a full-screen graphic makes
+            // IsPointerOverGameObject() true everywhere and no water block can
+            // ever be clicked.
+            tintImage.raycastTarget = false;
             var vignette = Stretch(ambient, "Vignette");
             var vignetteImage = vignette.gameObject.AddComponent<Image>();
             vignetteImage.sprite = vignetteSprite;
@@ -254,13 +313,13 @@ namespace WaterTurn
             bottomScrimImage.color = new Color(0.035f, 0.018f, 0.012f, 0.95f);
             bottomScrimImage.raycastTarget = false;
 
-            var title = Label(hud, "Title", "潮汐洞穴", 46, White, TextAnchor.MiddleLeft,
-                new Vector2(42, -24), new Vector2(620, 58), FontStyle.Bold);
+            var title = Label(hud, "Title", "潮汐洞穴 · 引水", 46, White, TextAnchor.MiddleLeft,
+                new Vector2(42, -24), new Vector2(760, 58), FontStyle.Bold);
             title.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.65f);
-            Label(hud, "Subtitle", "TIDAL HOLLOW  ·  序章", 15, Teal, TextAnchor.MiddleLeft,
+            Label(hud, "Subtitle", "TIDAL HOLLOW  ·  序章 · 水块谜题", 15, Teal, TextAnchor.MiddleLeft,
                 new Vector2(44, -82), new Vector2(620, 24), FontStyle.Bold);
-            Label(hud, "Deck", "被水淹没的旧矿道，五座石室藏着二十处潮心。", 14, Quiet,
-                TextAnchor.MiddleLeft, new Vector2(44, -106), new Vector2(720, 22));
+            Label(hud, "Deck", "亮色的水与小鱼相通，暗色的水被石壁截断。转动水块，把水路接起来。", 14, Quiet,
+                TextAnchor.MiddleLeft, new Vector2(44, -106), new Vector2(920, 22));
 
             var objectivePanel = PanelImage(hud, "ObjectivePanel", new Vector2(42, -138), new Vector2(650, 58),
                 new Color32(38, 24, 20, 225));
@@ -275,10 +334,13 @@ namespace WaterTurn
                 new Vector2(18, -9), new Vector2(488, 40));
             progress.supportRichText = true;
 
-            Label(hud, "Controls", "WASD / 方向键  游动        E / 空格  与海草共鸣", 14, Quiet,
-                TextAnchor.MiddleLeft, new Vector2(42, -734), new Vector2(640, 24));
-            Label(hud, "Footer", "小鱼只能在水里游  ·  被水淹没的矿道通向关卡", 12, new Color32(166, 128, 105, 255),
-                TextAnchor.MiddleRight, new Vector2(930, -734), new Vector2(308, 24));
+            Label(hud, "Controls", "WASD / 方向键 游动   ·   Space / 左键 旋转水块   ·   Z 撤销   ·   H 提示   ·   R 重开   ·   E 海草",
+                13, Quiet, TextAnchor.MiddleLeft, new Vector2(42, -734), new Vector2(880, 24));
+            statusText = Label(hud, "StatusLine", "", 13, Gold, TextAnchor.MiddleLeft,
+                new Vector2(42, -708), new Vector2(870, 20));
+            Label(hud, "Footer", "亮色水与小鱼相通  ·  暗色水被石壁截断", 12,
+                new Color32(166, 128, 105, 255), TextAnchor.MiddleRight,
+                new Vector2(930, -734), new Vector2(308, 24));
             zoomReadout = Label(hud, "ZoomReadout", "", 12, new Color32(196, 158, 126, 255),
                 TextAnchor.MiddleRight, new Vector2(930, -710), new Vector2(308, 20));
 
@@ -289,6 +351,8 @@ namespace WaterTurn
             promptBack.color = new Color32(46, 29, 24, 245);
             promptGroup = promptRoot.gameObject.AddComponent<CanvasGroup>();
             promptGroup.alpha = 0;
+            promptGroup.interactable = false;
+            promptGroup.blocksRaycasts = false;
             var keyCap = Box(promptRoot, "KeyCap", new Vector2(20, -13), new Vector2(38, 38), new Vector2(0, 1));
             var keyImage = keyCap.gameObject.AddComponent<Image>();
             keyImage.sprite = rounded;
@@ -306,6 +370,8 @@ namespace WaterTurn
             toastBack.color = new Color32(44, 27, 21, 238);
             toastGroup = toastRoot.gameObject.AddComponent<CanvasGroup>();
             toastGroup.alpha = 0;
+            toastGroup.interactable = false;
+            toastGroup.blocksRaycasts = false;
             toastText = CenterLabel(toastRoot, "ToastText", "", 16, Gold, TextAnchor.MiddleCenter,
                 Vector2.zero, new Vector2(610, 40));
 
@@ -324,6 +390,7 @@ namespace WaterTurn
             AddTunnelCanvas();
             AddProps();
             AddStartMarker();
+            AddValveViews();
 
             BuildPortals();
 
@@ -376,123 +443,204 @@ namespace WaterTurn
         void AddTunnelCanvas()
         {
             int tw = W * (int)Cell, th = H * (int)Cell;
-            if (tunnelSprites == null)
-            {
-                BuildTunnelFrames(tw, th);
-            }
-            tunnelImage = Img(mapRoot, "TunnelCanvas", tunnelSprites[0], Color.white,
+            tunnelImage = Img(mapRoot, "CaveFloor", BuildFloorSprite(tw, th), Color.white,
                 Vector2.zero, new Vector2(tw, th));
-            waterFrame = 0;
+            AddWaterTiles();
         }
 
-        void BuildTunnelFrames(int tw, int th)
+        /// <summary>
+        /// Bake the static cave floor once.  Water is no longer part of this
+        /// texture: it is drawn as separate tiles so a block can turn without
+        /// rebuilding a 1260x756 image.
+        /// </summary>
+        Sprite BuildFloorSprite(int tw, int th)
         {
             var rockPixels = rockTexture != null ? rockTexture.GetPixels32() : null;
             var floorPixels = floorSprite != null && floorSprite.texture != null
                 ? floorSprite.texture.GetPixels32()
                 : null;
             var floorRect = floorSprite != null ? floorSprite.textureRect : new Rect(0, 0, 1, 1);
-            var waterPixels = new Color32[waterFrames.Length][];
-            for (int i = 0; i < waterFrames.Length; i++)
-                waterPixels[i] = waterFrames[i].texture != null
-                    ? waterFrames[i].texture.GetPixels32()
-                    : null;
+            var pixels = new Color32[tw * th];
 
-            int frameCount = waterPixels.Length == 0 ? 1 : Mathf.Clamp(waterPixels.Length, 1, 4);
-            tunnelTextures = new Texture2D[frameCount];
-            tunnelSprites = new Sprite[frameCount];
-            for (int f = 0; f < frameCount; f++)
+            for (int sy = 0; sy < th; sy++)
             {
-                var pixels = new Color32[tw * th];
-                for (int sy = 0; sy < th; sy++)
+                int mapY = th - 1 - sy;
+                float fy = (mapY + .5f) / Cell;
+                for (int x = 0; x < tw; x++)
                 {
-                    int mapY = th - 1 - sy;
-                    float fy = (mapY + .5f) / Cell;
-                    for (int x = 0; x < tw; x++)
+                    float fx = (x + .5f) / Cell;
+                    int cx = (int)fx, cy = (int)fy;
+                    if (!puzzle.IsWalkableCell(cx, cy)) continue;
+
+                    float dist = DistanceToRock(fx, fy)
+                                 + Mathf.Sin(fx * 2.9f + fy * 1.7f) * .035f
+                                 + Mathf.Sin(fx * 1.1f - fy * 3.3f) * .025f;
+                    float edge = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(dist / .38f));
+                    if (edge <= .01f) continue;
+
+                    char baseTile = puzzle.BaseTile(cx, cy);
+                    bool wet = baseTile == '~' || HubPuzzle.IsGate(baseTile);
+                    bool niche = puzzle.IsValveCell(cx, cy);
+
+                    Color col;
+                    if (rockPixels != null && rockPixels.Length > 0)
                     {
-                        float fx = (x + .5f) / Cell;
-                        int cx = (int)fx, cy = (int)fy;
-                        char c = Tile(cx, cy);
-                        if (!IsWalkable(c)) continue;
-
-                        float dist = DistanceToRock(fx, fy)
-                                     + Mathf.Sin(fx * 2.9f + fy * 1.7f) * .035f
-                                     + Mathf.Sin(fx * 1.1f - fy * 3.3f) * .025f;
-                        float edge = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(dist / .38f));
-                        if (edge <= .01f) continue;
-
-                        bool water = IsWaterChar(c);
-                        Color col;
-                        if (water)
-                        {
-                            var src = waterPixels.Length > 0 ? waterPixels[f % waterPixels.Length] : null;
-                            if (src != null && src.Length > 0)
-                            {
-                                int sw = waterFrames[f % waterFrames.Length].texture.width;
-                                int sh = waterFrames[f % waterFrames.Length].texture.height;
-                                var p = src[((sy / 2) % sh) * sw + ((x / 2) % sw)];
-                                col = p;
-                            }
-                            else col = new Color(0.18f, 0.52f, 0.60f, 1f);
-                            col = new Color(col.r * .26f, col.g * .58f, col.b * .68f, 1f);
-                            float wave = Mathf.Sin(x * .038f + sy * .031f + f * 1.7f)
-                                         + Mathf.Sin(x * .011f - sy * .027f + f * .8f) * .5f;
-                            if (wave > .62f) col += new Color(.045f, .075f, .075f, 0f);
-                            float depth = Mathf.Clamp01((dist - .20f) / .45f);
-                            col = Color.Lerp(new Color(.035f, .11f, .14f), col, .55f + depth * .45f);
-
-                            float dryDist = DistanceToDry(fx, fy);
-                            if (dryDist < .14f)
-                            {
-                                float shore = Mathf.Clamp01(dryDist / .14f);
-                                col = Color.Lerp(new Color(.04f, .13f, .15f), col, shore);
-                                if (dryDist > .07f && dryDist < .11f)
-                                    col += new Color(.04f, .10f, .09f, 0f);
-                            }
-                        }
-                        else
-                        {
-                            if (rockPixels != null && rockPixels.Length > 0)
-                            {
-                                int sw = rockTexture.width;
-                                int sh = rockTexture.height;
-                                var p = rockPixels[((sy / 2) % sh) * sw + ((x / 2) % sw)];
-                                col = p;
-                            }
-                            else col = new Color(.38f, .27f, .22f, 1f);
-                            if (floorPixels != null && floorPixels.Length > 0)
-                            {
-                                int sw = floorSprite.texture.width;
-                                int sh = floorSprite.texture.height;
-                                int sx = (int)floorRect.x + ((x / 2) % Mathf.Max(1, (int)floorRect.width));
-                                int yy = (int)floorRect.y + ((sy / 2) % Mathf.Max(1, (int)floorRect.height));
-                                Color cave = floorPixels[(yy % sh) * sw + (sx % sw)];
-                                col = Color.Lerp(col, cave, .34f);
-                            }
-                            col = new Color(
-                                Mathf.Clamp01(col.r * 1.16f + .065f),
-                                Mathf.Clamp01(col.g * .84f + .040f),
-                                Mathf.Clamp01(col.b * .67f + .028f), 1f);
-                            float grain = ((x * 13 + sy * 7) % 11 - 5) * .006f;
-                            col += new Color(grain, grain * .7f, grain * .5f, 0f);
-                        }
-
-                        float rim = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((dist - .20f) / .17f));
-                        col = Color.Lerp(col, new Color(.055f, .033f, .025f), rim * .78f);
-                        if (rim > .35f && rim < .62f)
-                            col += new Color(.055f, .032f, .020f, 0f);
-                        col.a = edge;
-                        pixels[sy * tw + x] = col;
+                        int sw = rockTexture.width;
+                        int sh = rockTexture.height;
+                        var p = rockPixels[((sy / 2) % sh) * sw + ((x / 2) % sw)];
+                        col = p;
                     }
-                }
+                    else col = new Color(.38f, .27f, .22f, 1f);
 
-                var tex = new Texture2D(tw, th, TextureFormat.RGBA32, false);
-                tex.SetPixels32(pixels);
-                tex.Apply();
-                tex.filterMode = FilterMode.Point;
-                tex.wrapMode = TextureWrapMode.Clamp;
-                tunnelTextures[f] = tex;
-                tunnelSprites[f] = Sprite.Create(tex, new Rect(0, 0, tw, th), new Vector2(.5f, .5f), 100);
+                    if (floorPixels != null && floorPixels.Length > 0)
+                    {
+                        int sw = floorSprite.texture.width;
+                        int sh = floorSprite.texture.height;
+                        int sx = (int)floorRect.x + ((x / 2) % Mathf.Max(1, (int)floorRect.width));
+                        int yy = (int)floorRect.y + ((sy / 2) % Mathf.Max(1, (int)floorRect.height));
+                        Color cave = floorPixels[(yy % sh) * sw + (sx % sw)];
+                        col = Color.Lerp(col, cave, .38f);
+                    }
+
+                    col = new Color(
+                        Mathf.Clamp01(col.r * 1.14f + .060f),
+                        Mathf.Clamp01(col.g * .86f + .038f),
+                        Mathf.Clamp01(col.b * .70f + .026f), 1f);
+
+                    if (wet)
+                        col = Color.Lerp(col, new Color(.045f, .125f, .155f), .58f);
+                    else if (niche)
+                        col = Color.Lerp(col, new Color(.070f, .052f, .045f), .55f);
+
+                    float grain = ((x * 13 + sy * 7) % 11 - 5) * .006f;
+                    col += new Color(grain, grain * .7f, grain * .5f, 0f);
+                    if (niche) col += new Color(.014f, .010f, .008f, 0f);
+
+                    float rim = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((dist - .20f) / .17f));
+                    col = Color.Lerp(col, new Color(.055f, .033f, .025f), rim * .78f);
+                    if (rim > .35f && rim < .62f)
+                        col += new Color(.055f, .032f, .020f, 0f);
+                    col.a = edge;
+                    pixels[sy * tw + x] = col;
+                }
+            }
+
+            var tex = new Texture2D(tw, th, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, tw, th), new Vector2(.5f, .5f), 100);
+        }
+
+        void AddWaterTiles()
+        {
+            waterRoot = Box(mapRoot, "WaterTiles", Vector2.zero, new Vector2(W * Cell, H * Cell), Center);
+            for (int y = 0; y < H; y++)
+            {
+                for (int x = 0; x < W; x++)
+                {
+                    char b = puzzle.BaseTile(x, y);
+                    if (b != '~' && b != '.' && !HubPuzzle.IsGate(b)) continue;
+                    var go = new GameObject("WaterTile",
+                        typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                    go.transform.SetParent(waterRoot, false);
+                    var rt = (RectTransform)go.transform;
+                    rt.anchorMin = rt.anchorMax = Center;
+                    rt.pivot = Center;
+                    rt.anchoredPosition = CellPosition(x, y);
+                    rt.sizeDelta = new Vector2(Cell, Cell);
+                    var image = go.GetComponent<Image>();
+                    image.raycastTarget = false;
+                    image.preserveAspect = false;
+                    image.color = new Color(0.46f, 0.73f, 0.77f, 1f);
+                    waterTiles.Add(new WaterTile { X = x, Y = y, Image = image });
+                }
+            }
+            RefreshWaterTiles();
+        }
+
+        void RefreshWaterTiles()
+        {
+            for (int i = 0; i < waterTiles.Count; i++)
+            {
+                var tile = waterTiles[i];
+                if (tile.Image == null) continue;
+                var rt = tile.Image.rectTransform;
+                rt.anchoredPosition = CellPosition(tile.X, tile.Y);
+                rt.localRotation = Quaternion.identity;
+                bool water = puzzle.IsWaterCell(tile.X, tile.Y, level1Cleared);
+                tile.Image.enabled = water;
+                if (!water) continue;
+                tile.Mask = WaterMask(tile.X, tile.Y);
+            }
+
+            RecomputeReachability();
+            for (int i = 0; i < waterTiles.Count; i++)
+            {
+                var tile = waterTiles[i];
+                if (tile.Image == null || !tile.Image.enabled) continue;
+                tile.Image.color = reachable[tile.X, tile.Y]
+                    ? new Color(0.58f, 0.88f, 0.92f, 1f)
+                    : new Color(0.26f, 0.44f, 0.48f, .92f);
+            }
+            ApplyWaterFrame(true);
+        }
+
+        void RecomputeReachability()
+        {
+            System.Array.Clear(reachable, 0, reachable.Length);
+            int sx = GridX(fishPos.x), sy = GridY(fishPos.y);
+            if (!puzzle.IsWaterCell(sx, sy, level1Cleared)) return;
+            var queue = new Queue<Vector2Int>();
+            reachable[sx, sy] = true;
+            queue.Enqueue(new Vector2Int(sx, sy));
+            while (queue.Count > 0)
+            {
+                var p = queue.Dequeue();
+                TryFlow(p.x + 1, p.y, queue);
+                TryFlow(p.x - 1, p.y, queue);
+                TryFlow(p.x, p.y + 1, queue);
+                TryFlow(p.x, p.y - 1, queue);
+            }
+        }
+
+        void TryFlow(int x, int y, Queue<Vector2Int> queue)
+        {
+            if (x < 0 || x >= W || y < 0 || y >= H) return;
+            if (reachable[x, y]) return;
+            if (!puzzle.IsWaterCell(x, y, level1Cleared)) return;
+            reachable[x, y] = true;
+            queue.Enqueue(new Vector2Int(x, y));
+        }
+
+        int WaterMask(int x, int y)
+        {
+            int mask = 0;
+            if (!puzzle.IsWaterCell(x, y - 1, level1Cleared)) mask |= 1;
+            if (!puzzle.IsWaterCell(x, y + 1, level1Cleared)) mask |= 2;
+            if (!puzzle.IsWaterCell(x - 1, y, level1Cleared)) mask |= 4;
+            if (!puzzle.IsWaterCell(x + 1, y, level1Cleared)) mask |= 8;
+            return mask;
+        }
+
+        void ApplyWaterFrame(bool force)
+        {
+            if (waterTileVariants == null || waterTileVariants.Length == 0) return;
+            int tick = Mathf.FloorToInt(Time.unscaledTime * 6f);
+            int frame = tick % waterTileVariants.Length;
+            if (!force && frame == waterTileFrame) return;
+            waterTileFrame = frame;
+            var variants = waterTileVariants[frame];
+            if (variants == null) return;
+            for (int i = 0; i < waterTiles.Count; i++)
+            {
+                var tile = waterTiles[i];
+                if (tile.Image == null || !tile.Image.enabled) continue;
+                var sprite = variants[Mathf.Clamp(tile.Mask, 0, variants.Length - 1)];
+                if (sprite != null) tile.Image.sprite = sprite;
             }
         }
 
@@ -504,23 +652,7 @@ namespace WaterTurn
             for (int dx = -1; dx <= 1; dx++)
             {
                 int x = cx + dx, y = cy + dy;
-                if (IsWalkable(Tile(x, y))) continue;
-                float ddx = Mathf.Max(x - fx, fx - (x + 1), 0f);
-                float ddy = Mathf.Max(y - fy, fy - (y + 1), 0f);
-                best = Mathf.Min(best, Mathf.Sqrt(ddx * ddx + ddy * ddy));
-            }
-            return best;
-        }
-
-        float DistanceToDry(float fx, float fy)
-        {
-            float best = 9f;
-            int cx = (int)fx, cy = (int)fy;
-            for (int dy = -1; dy <= 1; dy++)
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                int x = cx + dx, y = cy + dy;
-                if (IsWaterChar(Tile(x, y))) continue;
+                if (puzzle.IsWalkableCell(x, y)) continue;
                 float ddx = Mathf.Max(x - fx, fx - (x + 1), 0f);
                 float ddy = Mathf.Max(y - fy, fy - (y + 1), 0f);
                 best = Mathf.Min(best, Mathf.Sqrt(ddx * ddx + ddy * ddy));
@@ -537,15 +669,15 @@ namespace WaterTurn
                 new Vector2Int(41, 16), new Vector2Int(23, 4),
             };
             for (int i = 0; i < rocks.Length; i++)
-                if (Tile(rocks[i].x, rocks[i].y) == '#')
+                if (IsRockCell(rocks[i].x, rocks[i].y))
                     AddProp(rockPropSprite, rocks[i].x, rocks[i].y, i, 0.75f, 0.75f, 0.55f);
 
             var pots = new[] { new Vector2Int(2, 13), new Vector2Int(43, 21), new Vector2Int(24, 2) };
             for (int i = 0; i < pots.Length; i++)
-                if (Tile(pots[i].x, pots[i].y) == '#')
+                if (IsRockCell(pots[i].x, pots[i].y))
                     AddProp(potSprite, pots[i].x, pots[i].y, i + 10, 0.80f, 0.80f, 0.62f);
 
-            if (Tile(23, 3) == '#')
+            if (IsRockCell(23, 3))
                 AddProp(statueSprite, 23, 3, 20, 0.70f, 0.70f, 0.58f);
 
             var dryRocks = new[]
@@ -559,14 +691,14 @@ namespace WaterTurn
                 new Vector2Int(35, 20), new Vector2Int(39, 20), new Vector2Int(13, 7), new Vector2Int(31, 7),
             };
             for (int i = 0; i < dryRocks.Length; i++)
-                if (Tile(dryRocks[i].x, dryRocks[i].y) == '.')
+                if (IsFreeDryCell(dryRocks[i].x, dryRocks[i].y))
                     AddProp(i % 3 == 0 ? potSprite : rockPropSprite, dryRocks[i].x, dryRocks[i].y,
                         i + 30, i % 3 == 0 ? 0.65f : 0.55f, 0.62f, 0.48f);
 
             for (int i = 0; i < 5; i++)
             {
                 int x = 3 + i * 9, y = 2 + (i % 2) * 20;
-                if (Tile(x, y) != '#') continue;
+                if (!IsRockCell(x, y)) continue;
                 Img(mapRoot, "CaveMotif", glowSprite, new Color(1f, 0.55f, 0.25f, 0.08f),
                     CellPosition(x, y), new Vector2(90, 90));
             }
@@ -578,7 +710,7 @@ namespace WaterTurn
                 new Vector2Int(12, 6), new Vector2Int(42, 12), new Vector2Int(42, 22), new Vector2Int(33, 22),
             };
             for (int i = 0; i < mushrooms.Length; i++)
-                if (Tile(mushrooms[i].x, mushrooms[i].y) == '.')
+                if (IsFreeDryCell(mushrooms[i].x, mushrooms[i].y))
                     AddMushroomPatch(mushrooms[i].x, mushrooms[i].y, i);
 
             var crystals = new[]
@@ -588,7 +720,7 @@ namespace WaterTurn
                 new Vector2Int(34, 21), new Vector2Int(40, 18),
             };
             for (int i = 0; i < crystals.Length; i++)
-                if (Tile(crystals[i].x, crystals[i].y) == '.')
+                if (IsFreeDryCell(crystals[i].x, crystals[i].y))
                     AddCrystalPatch(crystals[i].x, crystals[i].y, i);
         }
 
@@ -800,8 +932,8 @@ namespace WaterTurn
 
         void AddGates()
         {
-            AddGate(32, 12, 'g');
-            AddGate(15, 19, 'x');
+            AddGate(13, 21, 'g');
+            AddGate(31, 8, 'x');
         }
 
         void AddGate(int x, int y, char tile)
@@ -869,8 +1001,8 @@ namespace WaterTurn
         {
             var vents = new[]
             {
-                new Vector2Int(22, 16), new Vector2Int(15, 13), new Vector2Int(8, 10),
-                new Vector2Int(37, 9), new Vector2Int(37, 19), new Vector2Int(10, 20),
+                new Vector2Int(22, 16), new Vector2Int(16, 13), new Vector2Int(10, 8),
+                new Vector2Int(34, 9), new Vector2Int(37, 19), new Vector2Int(7, 19),
             };
             for (int i = 0; i < 30; i++)
             {
@@ -895,14 +1027,17 @@ namespace WaterTurn
         void Update()
         {
             float dt = Mathf.Min(Time.unscaledDeltaTime, .05f);
-            AnimateWater();
+            ApplyWaterFrame(false);
+            AnimateValves(dt);
             AnimatePortals(dt);
             AnimateBubbles(dt);
             AnimatePearl();
             UpdateToast(dt);
             if (traveling) return;
+            HandleMouse();
+            UpdateKeyboardValve();
             HandleInput(dt);
-            UpdateFish(dt);
+            if (!rotatingValve) UpdateFish(dt);
             UpdateCamera(dt);
             CheckPearlPickup();
             UpdatePrompt(dt);
@@ -1019,11 +1154,18 @@ namespace WaterTurn
             var keyboard = Keyboard.current;
             if (keyboard != null)
             {
-                if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) input.x -= 1;
-                if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) input.x += 1;
-                if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) input.y += 1;
-                if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) input.y -= 1;
-                if (keyboard.eKey.wasPressedThisFrame || keyboard.spaceKey.wasPressedThisFrame) Interact();
+                if (!rotatingValve)
+                {
+                    if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) input.x -= 1;
+                    if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) input.x += 1;
+                    if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) input.y += 1;
+                    if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) input.y -= 1;
+                }
+                if (keyboard.spaceKey.wasPressedThisFrame) RotateFocusedValve();
+                if (keyboard.eKey.wasPressedThisFrame) Interact();
+                if (keyboard.zKey.wasPressedThisFrame) UndoValve();
+                if (keyboard.hKey.wasPressedThisFrame) HintValve();
+                if (keyboard.rKey.wasPressedThisFrame) RestartValvePuzzle();
             }
 
             Vector2 desired = input.sqrMagnitude > .01f ? input.normalized * SwimSpeed : Vector2.zero;
@@ -1068,14 +1210,546 @@ namespace WaterTurn
             }
         }
 
-        void AnimateWater()
+        void AnimateValves(float dt)
         {
-            if (tunnelImage == null || tunnelSprites == null || tunnelSprites.Length == 0) return;
-            int tick = Mathf.FloorToInt(Time.unscaledTime * 5f);
-            if (tick % tunnelSprites.Length != waterFrame)
+            valveClock += dt;
+            if (hintTimer > 0)
             {
-                waterFrame = tick % tunnelSprites.Length;
-                tunnelImage.sprite = tunnelSprites[waterFrame];
+                hintTimer -= dt;
+                if (hintTimer <= 0) hintValve = null;
+            }
+
+            ValveView focus = hoveredValve != null
+                ? hoveredValve
+                : hintTimer > 0 && hintValve != null ? hintValve : keyboardValve;
+            if (focus != focusedValve)
+            {
+                focusedValve = focus;
+                UpdateStatusLine();
+            }
+
+            float pulse = .55f + Mathf.Sin(valveClock * 1.9f) * .18f;
+            for (int i = 0; i < valveViews.Count; i++)
+            {
+                var view = valveViews[i];
+                if (view.Root == null) continue;
+                bool hover = view == hoveredValve;
+                bool focused = view == focusedValve;
+                bool hinted = view == hintValve && hintTimer > 0;
+                bool open = puzzle.IsBlockOpen(view.Valve, level1Cleared);
+                Color tint = hinted ? Gold : open ? Teal : new Color(0.62f, 0.82f, 0.80f, 1f);
+                float alpha = hover || focused ? 1f : open ? .72f + pulse * .22f : .38f + pulse * .16f;
+                for (int b = 0; b < view.Brackets.Count; b++)
+                {
+                    var image = view.Brackets[b];
+                    if (image == null) continue;
+                    image.color = new Color(tint.r, tint.g, tint.b, alpha);
+                }
+                if (view.Glow != null)
+                    view.Glow.color = new Color(tint.r, tint.g, tint.b,
+                        hover ? .22f : focused ? .16f : hinted ? .20f : open ? .10f : .04f);
+                if (view.Glyph != null)
+                {
+                    view.Glyph.color = new Color(tint.r, tint.g, tint.b,
+                        hover || focused || hinted ? .98f : .55f);
+                    view.Glyph.rectTransform.localRotation =
+                        Quaternion.Euler(0, 0, Mathf.Sin(valveClock * .8f + i) * 6f);
+                }
+                int sides = puzzle.WetSides(view.Valve, level1Cleared);
+                for (int s = 0; s < view.SideDots.Count; s++)
+                {
+                    var dot = view.SideDots[s];
+                    if (dot == null) continue;
+                    bool lit = (sides & (1 << s)) != 0;
+                    dot.color = lit
+                        ? new Color(1f, 0.86f, 0.46f, hover || focused ? 1f : .95f)
+                        : new Color(0.44f, 0.62f, 0.61f, .34f);
+                }
+
+                // Ghost of where the two water cells will land after one turn.
+                bool showPreview = focused || hinted;
+                int preview = 0;
+                for (int p = 0; p < view.Preview.Count; p++)
+                    if (view.Preview[p] != null) view.Preview[p].enabled = false;
+                if (showPreview)
+                {
+                    int next = (view.Valve.State + 1) & 3;
+                    for (int dy = 0; dy < 2 && preview < view.Preview.Count; dy++)
+                    {
+                        for (int dx = 0; dx < 2 && preview < view.Preview.Count; dx++)
+                        {
+                            if (!HubPuzzle.WaterOffset(dx, dy, next)) continue;
+                            var ghost = view.Preview[preview++];
+                            if (ghost == null) continue;
+                            ghost.enabled = true;
+                            ghost.rectTransform.anchoredPosition =
+                                CellPosition(view.Valve.X + dx, view.Valve.Y + dy) - ValveCenter(view.Valve);
+                            float a = (hinted ? .38f : .22f) *
+                                      (.75f + Mathf.Sin(valveClock * 3.2f) * .25f);
+                            ghost.color = new Color(0.58f, 0.95f, 1f, a);
+                        }
+                    }
+                }
+
+                float target = hover ? 1.10f : hinted ? 1.08f : focused ? 1.04f : 1f;
+                float scale = Mathf.Lerp(view.Root.localScale.x, target, 1f - Mathf.Exp(-12f * dt));
+                view.Root.localScale = Vector3.one * scale;
+            }
+        }
+
+        void UpdateStatusLine()
+        {
+            if (statusText == null || puzzle == null) return;
+            string text = "步数 " + turnCount + "   ·   水道 " + puzzle.OpenCount(level1Cleared) +
+                          " / " + puzzle.Valves.Length;
+            if (focusedValve != null)
+            {
+                int index = System.Array.IndexOf(puzzle.Valves, focusedValve.Valve) + 1;
+                int next = (focusedValve.Valve.State + 1) & 3;
+                text += "   ·   水块 " + index + "  " + HubPuzzle.SidePair(focusedValve.Valve.State) +
+                        " → " + HubPuzzle.SidePair(next);
+            }
+            statusText.text = text;
+        }
+
+        void UpdateKeyboardValve()
+        {
+            if (hoveredValve != null)
+            {
+                keyboardValve = null;
+                return;
+            }
+
+            // A block right next to the fish wins, so swimming up to a block
+            // and pressing Space always turns the one you are looking at.
+            ValveView near = null;
+            float nearDistance = Cell * 2.6f;
+            for (int i = 0; i < valveViews.Count; i++)
+            {
+                var view = valveViews[i];
+                if (view == null) continue;
+                float distance = Vector2.Distance(fishPos, ValveCenter(view.Valve));
+                if (distance < nearDistance)
+                {
+                    nearDistance = distance;
+                    near = view;
+                }
+            }
+            if (near != null)
+            {
+                keyboardValve = near;
+                return;
+            }
+
+            // Otherwise Space aims at the block the current objective needs.
+            keyboardValve = FindObjectiveValve();
+        }
+
+        ValveView FindObjectiveValve()
+        {
+            int[] order = HintOrder();
+            for (int i = 0; i < order.Length; i++)
+            {
+                int index = order[i];
+                if (index < 0 || index >= valveViews.Count) continue;
+                if (valveViews[index].Valve.State != valveViews[index].Valve.Solution)
+                    return valveViews[index];
+            }
+            return null;
+        }
+
+        void HandleMouse()
+        {
+            var mouse = Mouse.current;
+            if (mouse == null) return;
+            Vector2 screen = mouse.position.ReadValue();
+
+            // Only real widgets capture the pointer. Tints, scrims, labels and
+            // the toast / prompt panels are pure decoration, so a valve that
+            // happens to sit behind them can still be clicked.
+            if (PointerOverWidget())
+            {
+                hoveredValve = null;
+                return;
+            }
+
+            hoveredValve = null;
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    mapRoot, screen, null, out Vector2 local))
+            {
+                int gx = GridX(local.x), gy = GridY(local.y);
+                var valve = puzzle.ValveAt(gx, gy);
+                if (valve != null) hoveredValve = ValveViewFor(valve);
+            }
+
+            if (mouse.leftButton.wasPressedThisFrame && hoveredValve != null)
+            {
+                TryRotateValve(hoveredValve);
+            }
+        }
+
+        /// <summary>
+        /// True only when the pointer sits on something the player can press.
+        /// <c>IsPointerOverGameObject()</c> is not usable here: it reports any
+        /// graphic under the cursor, so a decorative full-screen tint froze the
+        /// valve clicks for the whole hub.
+        /// </summary>
+        bool PointerOverWidget()
+        {
+            var system = EventSystem.current;
+            var mouse = Mouse.current;
+            if (system == null || mouse == null) return false;
+            if (pointerEvent == null) pointerEvent = new PointerEventData(system);
+            pointerEvent.position = mouse.position.ReadValue();
+            pointerHits.Clear();
+            system.RaycastAll(pointerEvent, pointerHits);
+            for (int i = 0; i < pointerHits.Count; i++)
+                if (pointerHits[i].gameObject.GetComponentInParent<Selectable>() != null)
+                    return true;
+            return false;
+        }
+
+        ValveView ValveViewFor(HubPuzzle.Valve valve)
+        {
+            for (int i = 0; i < valveViews.Count; i++)
+                if (valveViews[i].Valve == valve) return valveViews[i];
+            return null;
+        }
+
+        void TryRotateValve(ValveView view)
+        {
+            if (view == null || traveling || rotatingValve) return;
+            var valve = view.Valve;
+            int nextState = (valve.State + 1) & 3;
+
+            bool fishRides = FishInValve(valve);
+            int newDx = 0, newDy = 0;
+            if (fishRides)
+            {
+                int gx = GridX(fishPos.x), gy = GridY(fishPos.y);
+                int dx = Mathf.Clamp(gx - valve.X, 0, 1);
+                int dy = Mathf.Clamp(gy - valve.Y, 0, 1);
+                newDx = 1 - dy;
+                newDy = dx;
+                int nx = valve.X + newDx, ny = valve.Y + newDy;
+                if (!CanFitNext(CellPosition(nx, ny), valve, nextState))
+                {
+                    ShowToast("这一步会把小鱼挤进石壁。先游出去，再转这块水块。", 3.2f);
+                    return;
+                }
+            }
+
+            undoStack.Push(Snapshot());
+            turnCount++;
+            HintClear();
+            StartCoroutine(RotateValveRoutine(view, fishRides, newDx, newDy));
+        }
+
+        bool FishInValve(HubPuzzle.Valve valve)
+        {
+            int gx = GridX(fishPos.x), gy = GridY(fishPos.y);
+            return gx >= valve.X && gx <= valve.X + 1 && gy >= valve.Y && gy <= valve.Y + 1;
+        }
+
+        bool ValveCellWater(HubPuzzle.Valve valve, int state, int x, int y)
+        {
+            if (x < valve.X || x > valve.X + 1 || y < valve.Y || y > valve.Y + 1) return false;
+            return HubPuzzle.WaterOffset(x - valve.X, y - valve.Y, state);
+        }
+
+        /// <summary>
+        /// Same clearance test as <see cref="CanFit"/>, but a valve is evaluated
+        /// in the orientation it is about to have, so the fish can ride the
+        /// turning block exactly like it rides the room in a level.
+        /// </summary>
+        bool CanFitNext(Vector2 local, HubPuzzle.Valve valve, int state)
+        {
+            for (int i = -1; i < 8; i++)
+            {
+                Vector2 sample = i < 0
+                    ? local
+                    : local + new Vector2(Mathf.Cos(i * Mathf.PI * .25f),
+                        Mathf.Sin(i * Mathf.PI * .25f)) * FishRadius;
+                int x = GridX(sample.x), y = GridY(sample.y);
+                bool water = valve != null && x >= valve.X && x <= valve.X + 1 &&
+                             y >= valve.Y && y <= valve.Y + 1
+                    ? ValveCellWater(valve, state, x, y)
+                    : puzzle.IsWaterCell(x, y, level1Cleared);
+                if (!water) return false;
+            }
+            return true;
+        }
+
+        HubSnapshot Snapshot()
+        {
+            var snapshot = new HubSnapshot
+            {
+                States = new int[puzzle.Valves.Length],
+                Fish = fishPos,
+                Turns = turnCount
+            };
+            for (int i = 0; i < puzzle.Valves.Length; i++)
+                snapshot.States[i] = puzzle.Valves[i].State;
+            return snapshot;
+        }
+
+        void RotateFocusedValve()
+        {
+            if (rotatingValve || traveling) return;
+            ValveView target = hoveredValve != null
+                ? hoveredValve
+                : hintTimer > 0 && hintValve != null ? hintValve : keyboardValve;
+            if (target == null)
+            {
+                if (FindObjectiveValve() == null)
+                    ShowToast("当前目标的水路已经接好了。去海草那里进入关卡吧。", 2.8f);
+                else
+                    ShowToast("用鼠标指向一块发光的水块，或靠近它再按 Space。", 2.8f);
+                return;
+            }
+            TryRotateValve(target);
+        }
+
+        void UndoValve()
+        {
+            if (rotatingValve || traveling) return;
+            if (undoStack.Count == 0)
+            {
+                ShowToast("没有可以撤销的转动。", 2f);
+                return;
+            }
+            var snapshot = undoStack.Pop();
+            for (int i = 0; i < puzzle.Valves.Length && i < snapshot.States.Length; i++)
+                puzzle.Valves[i].State = snapshot.States[i];
+            fishPos = snapshot.Fish;
+            fishVel = Vector2.zero;
+            turnCount = snapshot.Turns;
+            if (fishRoot != null)
+            {
+                fishRoot.anchoredPosition = fishPos;
+                fishRoot.localRotation = Quaternion.identity;
+            }
+            HintClear();
+            RefreshWaterTiles();
+            RefreshHud();
+            ShowToast("已撤销上一次转动。", 2f);
+        }
+
+        void RestartValvePuzzle()
+        {
+            if (rotatingValve || traveling) return;
+            puzzle.Reset();
+            undoStack.Clear();
+            turnCount = 0;
+            fishPos = CellPosition(22, 16);
+            fishVel = Vector2.zero;
+            if (fishRoot != null)
+            {
+                fishRoot.anchoredPosition = fishPos;
+                fishRoot.localRotation = Quaternion.identity;
+            }
+            HintClear();
+            RefreshWaterTiles();
+            RefreshHud();
+            ShowToast("水块已复位，小鱼回到起点。", 2.6f);
+        }
+
+        void HintValve()
+        {
+            if (rotatingValve || traveling || puzzle == null) return;
+            if (hiddenCleared)
+            {
+                ShowToast("潮汐洞穴已经完全苏醒了，没有还需要转动的水块。", 3.2f);
+                return;
+            }
+            if (pearlTaken)
+            {
+                int nextLevel = Mathf.Clamp(GameSession.LevelsCleared, 0, Campaign.VisibleLevels - 1);
+                if (nextLevel >= 8 && nextLevel < 12)
+                {
+                    ShowToast("中央石室就在起点旁边，直接去海草那里进入第 " +
+                              (nextLevel + 1).ToString("00") + " 关。", 3.6f);
+                    return;
+                }
+            }
+
+            ValveView target = FindObjectiveValve();
+            if (target == null)
+            {
+                ShowToast("当前目标的水路已经接好了。去海草那里进入关卡吧。", 3.2f);
+                return;
+            }
+
+            hintValve = target;
+            hintTimer = 6f;
+            focusedValve = target;
+            UpdateStatusLine();
+            ShowToast("提示：把这块水块转到 " + HubPuzzle.SidePair(target.Valve.Solution) +
+                      "（Space / 左键）。", 4.2f);
+        }
+
+        int[] HintOrder()
+        {
+            if (!pearlTaken) return new[] { 4, 5 };
+            if (GameSession.LevelsCleared >= Campaign.VisibleLevels) return new[] { 3 };
+            int nextLevel = Mathf.Clamp(GameSession.LevelsCleared, 0, Campaign.VisibleLevels - 1);
+            if (nextLevel < 4) return new[] { 0, 1 };
+            if (nextLevel < 8) return new[] { 2 };
+            if (nextLevel < 12) return new int[0];
+            if (nextLevel < 16) return new[] { 3 };
+            return new[] { 4, 5 };
+        }
+
+        void HintClear()
+        {
+            hintTimer = 0f;
+            hintValve = null;
+        }
+
+        WaterTile TileAt(int x, int y)
+        {
+            for (int i = 0; i < waterTiles.Count; i++)
+                if (waterTiles[i].X == x && waterTiles[i].Y == y) return waterTiles[i];
+            return null;
+        }
+
+        IEnumerator RotateValveRoutine(ValveView view, bool fishRides, int newDx, int newDy)
+        {
+            rotatingValve = true;
+            fishVel = Vector2.zero;
+            var valve = view.Valve;
+            var center = ValveCenter(valve);
+            var fishOffset = fishPos - center;
+            var moving = new List<WaterTile>(2);
+            var offsets = new List<Vector2>(2);
+            for (int dy = 0; dy < 2; dy++)
+            {
+                for (int dx = 0; dx < 2; dx++)
+                {
+                    if (!HubPuzzle.WaterOffset(dx, dy, valve.State)) continue;
+                    var tile = TileAt(valve.X + dx, valve.Y + dy);
+                    if (tile == null || tile.Image == null) continue;
+                    var rt = tile.Image.rectTransform;
+                    rt.anchoredPosition = CellPosition(tile.X, tile.Y);
+                    rt.localRotation = Quaternion.identity;
+                    tile.Image.enabled = true;
+                    moving.Add(tile);
+                    offsets.Add(rt.anchoredPosition - center);
+                }
+            }
+
+            float t = 0;
+            float duration = Mathf.Max(.05f, valveRotateDuration);
+            while (t < duration)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / duration));
+                var rotation = Quaternion.Euler(0, 0, -90f * k);
+                for (int i = 0; i < moving.Count; i++)
+                {
+                    var rt = moving[i].Image.rectTransform;
+                    rt.anchoredPosition = center + (Vector2)(rotation * offsets[i]);
+                    rt.localRotation = rotation;
+                }
+                if (fishRides)
+                {
+                    fishPos = center + (Vector2)(rotation * fishOffset);
+                    if (fishRoot != null)
+                    {
+                        fishRoot.anchoredPosition = fishPos + new Vector2(0, fishBob);
+                        fishRoot.localRotation = rotation;
+                    }
+                }
+                yield return null;
+            }
+
+            puzzle.Rotate(valve);
+            if (fishRides)
+            {
+                fishPos = CellPosition(valve.X + newDx, valve.Y + newDy);
+                fishVel = Vector2.zero;
+                if (fishRoot != null)
+                {
+                    fishRoot.anchoredPosition = fishPos + new Vector2(0, fishBob);
+                    fishRoot.localRotation = Quaternion.identity;
+                }
+            }
+            RefreshWaterTiles();
+            Burst(center, new Color(0.55f, 0.95f, 0.96f, 1f));
+            ShowToast("水块转向：" + HubPuzzle.SidePair(valve.State) +
+                      (puzzle.IsBlockOpen(valve, level1Cleared) ? " · 水道接通" : " · 这一侧没有水"), 2.4f);
+            RefreshHud();
+            rotatingValve = false;
+        }
+
+        Vector2 ValveCenter(HubPuzzle.Valve valve)
+        {
+            return CellPosition(valve.X, valve.Y) + new Vector2(Cell * .5f, -Cell * .5f);
+        }
+
+        void AddValveViews()
+        {
+            valveRoot = Box(mapRoot, "WaterBlocks", Vector2.zero,
+                new Vector2(W * Cell, H * Cell), Center);
+            for (int i = 0; i < puzzle.Valves.Length; i++)
+            {
+                var valve = puzzle.Valves[i];
+                var root = Box(valveRoot, "WaterBlock " + (i + 1), ValveCenter(valve),
+                    new Vector2(Cell * 2f + 10f, Cell * 2f + 10f), Center);
+                var view = new ValveView { Valve = valve, Root = root };
+
+                view.Glow = Img(root, "ValveGlow", glowSprite,
+                    new Color(0.45f, 0.95f, 0.92f, .06f), Vector2.zero,
+                    new Vector2(Cell * 2.9f, Cell * 2.9f));
+
+                for (int p = 0; p < 2; p++)
+                {
+                    var ghost = Img(root, "TurnPreview", rounded,
+                        new Color(0.58f, 0.95f, 1f, .18f), Vector2.zero,
+                        new Vector2(Cell - 2f, Cell - 2f));
+                    ghost.enabled = false;
+                    ghost.rectTransform.localRotation = Quaternion.identity;
+                    view.Preview.Add(ghost);
+                }
+
+                float half = Cell + 3f;
+                float arm = 10f;
+                float thick = 2.2f;
+                for (int corner = 0; corner < 4; corner++)
+                {
+                    float sx = (corner == 0 || corner == 3) ? -1f : 1f;
+                    float sy = (corner < 2) ? 1f : -1f;
+                    var h = Img(root, "CornerH", rounded, Color.white,
+                        new Vector2(sx * (half - arm * .5f), sy * half), new Vector2(arm, thick));
+                    var v = Img(root, "CornerV", rounded, Color.white,
+                        new Vector2(sx * half, sy * (half - arm * .5f)), new Vector2(thick, arm));
+                    h.rectTransform.localRotation = Quaternion.identity;
+                    view.Brackets.Add(h);
+                    view.Brackets.Add(v);
+                }
+
+                view.Glyph = CenterLabel(root, "ValveGlyph", "↻", 20,
+                    new Color(0.62f, 0.95f, 0.94f, .6f), TextAnchor.MiddleCenter,
+                    Vector2.zero, new Vector2(34, 34), FontStyle.Bold);
+                view.Glyph.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, .7f);
+                view.Glyph.raycastTarget = false;
+
+                for (int side = 0; side < 4; side++)
+                {
+                    Vector2 dotPos;
+                    switch (side)
+                    {
+                        case 0: dotPos = new Vector2(0, half + 2f); break;   // north
+                        case 1: dotPos = new Vector2(half + 2f, 0); break;   // east
+                        case 2: dotPos = new Vector2(0, -half - 2f); break;  // south
+                        default: dotPos = new Vector2(-half - 2f, 0); break; // west
+                    }
+                    var dot = Img(root, "SideDot", ellipse, new Color(0.44f, 0.62f, 0.61f, .34f),
+                        dotPos, new Vector2(6.5f, 6.5f));
+                    dot.rectTransform.localRotation = Quaternion.identity;
+                    view.SideDots.Add(dot);
+                }
+                valveViews.Add(view);
             }
         }
 
@@ -1180,19 +1854,20 @@ namespace WaterTurn
         int GridX(float localX) => Mathf.FloorToInt(localX / Cell + W * .5f);
         int GridY(float localY) => Mathf.FloorToInt(H * .5f - localY / Cell);
 
-        char Tile(int x, int y)
-        {
-            if (x < 0 || x >= W || y < 0 || y >= H) return '#';
-            return Map[y][x];
-        }
+        char Tile(int x, int y) => puzzle.Tile(x, y, level1Cleared);
 
-        bool IsDry(int x, int y) => Tile(x, y) == '.';
+        char BaseTile(int x, int y) => puzzle.BaseTile(x, y);
+
+        bool IsRockCell(int x, int y) => puzzle.BaseTile(x, y) == '#';
+
+        bool IsFreeDryCell(int x, int y) =>
+            puzzle.BaseTile(x, y) == '.' && !puzzle.IsValveCell(x, y);
+
+        bool IsDry(int x, int y) => BaseTile(x, y) == '.';
 
         bool IsWaterAt(Vector2 local)
         {
-            char c = Tile(GridX(local.x), GridY(local.y));
-            if (IsGateChar(c)) return level1Cleared;
-            return c == '~' || c == '1' || c == '2' || c == 'H' || c == 'K' || c == '@';
+            return puzzle.IsWaterCell(GridX(local.x), GridY(local.y), level1Cleared);
         }
 
         bool CanFit(Vector2 local)
@@ -1289,7 +1964,7 @@ namespace WaterTurn
 
         void Interact()
         {
-            if (nearest == null) return;
+            if (rotatingValve || nearest == null) return;
             if (!PortalReady(nearest))
             {
                 if (!pearlTaken)
@@ -1381,6 +2056,8 @@ namespace WaterTurn
             }
             gate.Group.alpha = 0f;
             level1Cleared = true;
+            RefreshWaterTiles();
+            RefreshHud();
         }
 
         // ---------------------------------------------------------------- pearl
@@ -1440,19 +2117,31 @@ namespace WaterTurn
             if (objective == null) return;
             if (hiddenCleared)
                 objective.text = "隐藏关的回声已经归位。潮汐洞穴完全苏醒了。";
-            else if (hiddenUnlocked)
-                objective.text = "石门已经打开。按顺序挑战潮心，或进入隐藏关。";
-            else if (pearlTaken)
-                objective.text = "海草醒了。去西北石室，从第一关开始。";
+            else if (!pearlTaken)
+                objective.text = "转动东南方向的水块，把水路接到潮汐珍珠所在的石室。";
+            else if (GameSession.LevelsCleared >= Campaign.VisibleLevels)
+                objective.text = "二十关已经全部完成。西南石室的隐藏关还在等你。";
             else
-                objective.text = "找到沉在东南石室里的潮汐珍珠。";
+            {
+                int next = Mathf.Clamp(GameSession.LevelsCleared, 0, Campaign.VisibleLevels - 1);
+                string room = next < 4 ? "西北" : next < 8 ? "东北" : next < 12 ? "中央" :
+                    next < 16 ? "西南" : "东南";
+                objective.text = next >= 8 && next < 12
+                    ? "中央石室的海草已经醒了。前往第 " + (next + 1).ToString("00") + " 关。"
+                    : "转动水块，把水路引向" + room + "石室，前往第 " + (next + 1).ToString("00") + " 关。";
+                if (hiddenUnlocked)
+                    objective.text += "  隐藏关在西南。";
+            }
 
             int reachable = pearlTaken
                 ? Mathf.Clamp(GameSession.LevelsCleared + 1, 1, Campaign.VisibleLevels)
                 : 0;
-            progress.text = Chip("潮汐珍珠", pearlTaken) + "    " +
-                             "<color=#7cf0dc>可达 " + reachable + " / " + Campaign.VisibleLevels + "</color>" + "    " +
-                             Chip("隐藏关", hiddenCleared);
+            int open = puzzle != null ? puzzle.OpenCount(level1Cleared) : 0;
+            progress.text = "<color=#7cf0dc>水道 " + open + " / " + (puzzle != null ? puzzle.Valves.Length : 0) +
+                            "</color>    " + Chip("潮汐珍珠", pearlTaken) + "    " +
+                            "<color=#7cf0dc>可达 " + reachable + " / " + Campaign.VisibleLevels + "</color>" + "    " +
+                            Chip("隐藏关", hiddenCleared);
+            UpdateStatusLine();
         }
 
         static string Chip(string name, bool on)
@@ -1915,6 +2604,31 @@ namespace WaterTurn
             public float Age, Life, Speed, Phase;
         }
 
+        sealed class WaterTile
+        {
+            public int X, Y;
+            public Image Image;
+            public int Mask;
+        }
+
+        sealed class ValveView
+        {
+            public HubPuzzle.Valve Valve;
+            public RectTransform Root;
+            public Image Glow;
+            public readonly List<Image> Brackets = new List<Image>();
+            public readonly List<Image> SideDots = new List<Image>();
+            public readonly List<Image> Preview = new List<Image>();
+            public Text Glyph;
+        }
+
+        struct HubSnapshot
+        {
+            public int[] States;
+            public Vector2 Fish;
+            public int Turns;
+        }
+
 #if UNITY_EDITOR
         // Test hooks used by the pipeline during play-mode screenshots.
         public void DebugGotoPortal(int index)
@@ -1943,12 +2657,165 @@ namespace WaterTurn
                 gate.Open = true;
                 OpenGateImmediate(gate);
             }
+            RefreshWaterTiles();
             RefreshHud();
         }
 
         public void DebugTravelTo(int level)
         {
             GameSession.EnterLevel(level);
+        }
+
+        public void DebugSetRotateDuration(float seconds)
+        {
+            valveRotateDuration = Mathf.Clamp(seconds, .05f, 20f);
+        }
+
+        public void DebugRotateValve(int index)
+        {
+            if (index < 0 || index >= puzzle.Valves.Length) return;
+            puzzle.Rotate(puzzle.Valves[index]);
+            RefreshWaterTiles();
+            RefreshHud();
+        }
+
+        public void DebugSetValve(int index, int state)
+        {
+            if (index < 0 || index >= puzzle.Valves.Length) return;
+            puzzle.Valves[index].State = ((state % 4) + 4) % 4;
+            RefreshWaterTiles();
+            RefreshHud();
+        }
+
+        public void DebugSolveValves()
+        {
+            puzzle.Solve();
+            RefreshWaterTiles();
+            RefreshHud();
+        }
+
+        public void DebugResetValves()
+        {
+            puzzle.Reset();
+            RefreshWaterTiles();
+            RefreshHud();
+        }
+
+        public void DebugGotoCell(int x, int y)
+        {
+            fishPos = CellPosition(x, y);
+            fishVel = Vector2.zero;
+            RefreshWaterTiles();
+            UpdateKeyboardValve();
+            focusedValve = keyboardValve;
+            UpdateStatusLine();
+        }
+
+        public int DebugValveCount => puzzle != null ? puzzle.Valves.Length : 0;
+
+        public int DebugTurnCount => turnCount;
+
+        public int DebugUndoCount => undoStack.Count;
+
+        public void DebugRotateFocused()
+        {
+            RotateFocusedValve();
+        }
+
+        public void DebugUndo()
+        {
+            UndoValve();
+        }
+
+        public void DebugHint()
+        {
+            HintValve();
+        }
+
+        public void DebugRestart()
+        {
+            RestartValvePuzzle();
+        }
+
+        /// <summary>Same hit test the mouse uses, but fed a screen point.</summary>
+        public bool DebugClickScreen(float x, float y)
+        {
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    mapRoot, new Vector2(x, y), null, out Vector2 local)) return false;
+            var valve = puzzle.ValveAt(GridX(local.x), GridY(local.y));
+            if (valve == null) return false;
+            TryRotateValve(ValveViewFor(valve));
+            return true;
+        }
+
+        public string DebugValveAtScreen(float x, float y)
+        {
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    mapRoot, new Vector2(x, y), null, out Vector2 local)) return "none";
+            var valve = puzzle.ValveAt(GridX(local.x), GridY(local.y));
+            if (valve == null) return "none";
+            return "valve " + System.Array.IndexOf(puzzle.Valves, valve) +
+                   " state " + valve.State + " link " + valve.LinkLabel;
+        }
+
+        public string DebugValveScreenPoints()
+        {
+            var builder = new System.Text.StringBuilder();
+            for (int i = 0; i < puzzle.Valves.Length; i++)
+            {
+                var p = RectTransformUtility.WorldToScreenPoint(null,
+                    mapRoot.TransformPoint(ValveCenter(puzzle.Valves[i])));
+                builder.Append(i).Append(':').Append(Mathf.RoundToInt(p.x))
+                    .Append(',').Append(Mathf.RoundToInt(p.y)).Append(' ');
+            }
+            return builder.ToString();
+        }
+
+        public string DebugReachReport()
+        {
+            var start = new Vector2Int(GridX(fishPos.x), GridY(fishPos.y));
+            var seen = new HashSet<Vector2Int>();
+            var queue = new Queue<Vector2Int>();
+            if (!puzzle.IsWaterCell(start.x, start.y, level1Cleared)) return "fish not in water";
+            seen.Add(start);
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var p = queue.Dequeue();
+                foreach (var d in new[]
+                         {
+                             new Vector2Int(1, 0), new Vector2Int(-1, 0),
+                             new Vector2Int(0, 1), new Vector2Int(0, -1)
+                         })
+                {
+                    var n = p + d;
+                    if (seen.Contains(n)) continue;
+                    if (!puzzle.IsWaterCell(n.x, n.y, level1Cleared)) continue;
+                    seen.Add(n);
+                    queue.Enqueue(n);
+                }
+            }
+            return "reachable " + seen.Count + " cells from " + start +
+                   "; NW " + (seen.Contains(new Vector2Int(6, 8)) || seen.Contains(new Vector2Int(7, 8)) ||
+                              seen.Contains(new Vector2Int(6, 9)) || seen.Contains(new Vector2Int(7, 9))) +
+                   "; NE " + (seen.Contains(new Vector2Int(36, 8)) || seen.Contains(new Vector2Int(37, 8)) ||
+                              seen.Contains(new Vector2Int(36, 9)) || seen.Contains(new Vector2Int(37, 9))) +
+                   "; SW " + (seen.Contains(new Vector2Int(6, 18)) || seen.Contains(new Vector2Int(7, 18)) ||
+                              seen.Contains(new Vector2Int(6, 19)) || seen.Contains(new Vector2Int(7, 19))) +
+                   "; SE " + (seen.Contains(new Vector2Int(36, 18)) || seen.Contains(new Vector2Int(37, 18)) ||
+                              seen.Contains(new Vector2Int(36, 19)) || seen.Contains(new Vector2Int(37, 19)));
+        }
+
+        public string DebugFishCell()
+        {
+            return GridX(fishPos.x) + "," + GridY(fishPos.y);
+        }
+
+        public string DebugValveState(int index)
+        {
+            if (puzzle == null || index < 0 || index >= puzzle.Valves.Length) return "?";
+            var valve = puzzle.Valves[index];
+            return valve.State + " (" + HubPuzzle.SidePair(valve.State) + ")";
         }
 #endif
     }
