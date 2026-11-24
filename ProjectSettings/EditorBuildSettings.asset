@@ -9,6 +9,9 @@ EditorBuildSettings:
     path: Assets/Scenes/WaterTurnHub.unity
     guid: 9c6c735258966aa47b14b29ea88069ce
   - enabled: 1
+    path: Assets/Scenes/JellyRun.unity
+    guid: aad7eca6b62257448b0d8cf0271cef39
+  - enabled: 1
     path: Assets/Scenes/Level_01.unity
     guid: bd88ac57c7063fc449eaf83de4edc207
   - enabled: 1

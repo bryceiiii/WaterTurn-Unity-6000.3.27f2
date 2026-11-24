@@ -101,12 +101,13 @@ namespace WaterTurn
         static bool LoadSet(Sprite[][] sets, string kind)
         {
             bool complete = true;
+            string folder = kind == "jump" ? "Art/Fish/Jump/" : "Art/Fish/";
             for (int f = 0; f < sets.Length; f++)
             {
                 var frames = new Sprite[FrameCount];
                 for (int i = 0; i < FrameCount; i++)
                 {
-                    frames[i] = Resources.Load<Sprite>("Art/Fish/" + kind + "_" + Names[f] + "_" + i);
+                    frames[i] = Resources.Load<Sprite>(folder + kind + "_" + Names[f] + "_" + i);
                     if (frames[i] == null) complete = false;
                 }
                 sets[f] = frames;

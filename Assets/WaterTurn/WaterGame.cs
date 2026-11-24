@@ -523,8 +523,24 @@ namespace WaterTurn
                 current.Sensor >= 0 ? "闸门   " + (position.Gate ? "已开" : "未开") : "水路   已接通",
                 current.Pearl >= 0 ? "珍珠   " + (position.Pearl ? "1 / 1" : "0 / 1") : "评价   从容通过",
             };
+            if (GameSession.InJellyRunChain)
+            {
+                int next = GameSession.NextRunLevel(index);
+                lines[2] = "本章   " + ((index % 4) + 1) + " / 4   ·   " +
+                           (next >= 0 ? "下一关 " + (next + 1).ToString("00") : "章节完成");
+            }
             yield return WaterFx.Instance.ShowClearCard(title, (index + 1).ToString("00") + "  " + current.Name, lines);
-            WaterFx.GoToHub(index);
+
+            int advance = GameSession.NextRunLevel(index);
+            if (advance >= 0)
+            {
+                WaterFx.GoToLevel(advance);
+            }
+            else
+            {
+                GameSession.EndRun();
+                WaterFx.GoToHub(index);
+            }
         }
 
         void SetHeader()
@@ -591,6 +607,7 @@ namespace WaterTurn
             if (won)
             {
                 GameSession.LastCompletedLevel = index;
+                GameSession.RecordRunLevelCleared(index);
                 if (index == 0)
                 {
                     PlayerPrefs.SetInt(GameSession.HiddenUnlockedKey, 1);

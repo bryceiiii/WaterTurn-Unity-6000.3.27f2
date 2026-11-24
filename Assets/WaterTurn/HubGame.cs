@@ -336,8 +336,8 @@ namespace WaterTurn
                 new Vector2(18, -9), new Vector2(488, 40));
             progress.supportRichText = true;
 
-            Label(hud, "Controls", "WASD / 方向键 游动   ·   Space / 左键 旋转水块   ·   Z 撤销   ·   H 提示   ·   R 重开   ·   E 海草",
-                13, Quiet, TextAnchor.MiddleLeft, new Vector2(42, -734), new Vector2(880, 24));
+            Label(hud, "Controls", "WASD / 方向键 游动   ·   Space / 左键 旋转水块   ·   Z 撤销   ·   H 提示   ·   R 重开   ·   E 海草   ·   J 果冻潮池",
+                13, Quiet, TextAnchor.MiddleLeft, new Vector2(42, -734), new Vector2(1000, 24));
             statusText = Label(hud, "StatusLine", "", 13, Gold, TextAnchor.MiddleLeft,
                 new Vector2(42, -708), new Vector2(870, 20));
             Label(hud, "Footer", "亮色水与小鱼相通  ·  暗色水被石壁截断", 12,
@@ -345,6 +345,22 @@ namespace WaterTurn
                 new Vector2(930, -734), new Vector2(308, 24));
             zoomReadout = Label(hud, "ZoomReadout", "", 12, new Color32(196, 158, 126, 255),
                 TextAnchor.MiddleRight, new Vector2(930, -710), new Vector2(308, 20));
+
+            var jellyButtonRect = Box(hud, "JellyRunButton", new Vector2(930, -664), new Vector2(300, 34), new Vector2(0, 1));
+            var jellyButtonImage = jellyButtonRect.gameObject.AddComponent<Image>();
+            jellyButtonImage.sprite = rounded;
+            jellyButtonImage.type = Image.Type.Sliced;
+            jellyButtonImage.color = new Color32(38, 24, 20, 235);
+            var jellyButton = jellyButtonRect.gameObject.AddComponent<Button>();
+            jellyButton.targetGraphic = jellyButtonImage;
+            jellyButton.onClick.AddListener(() =>
+            {
+                if (traveling) return;
+                traveling = true;
+                WaterFx.GoToJellyRun(-1);
+            });
+            CenterLabel(jellyButtonRect, "JellyRunLabel", "果冻潮池 · 5 处关卡入口 ▶", 14, Teal,
+                TextAnchor.MiddleCenter, Vector2.zero, new Vector2(290, 30), FontStyle.Bold);
 
             promptRoot = Box(hud, "Prompt", new Vector2(385, -664), new Vector2(510, 64), new Vector2(0, 1));
             var promptBack = promptRoot.gameObject.AddComponent<Image>();
@@ -1165,6 +1181,12 @@ namespace WaterTurn
                 }
                 if (keyboard.spaceKey.wasPressedThisFrame) RotateFocusedValve();
                 if (keyboard.eKey.wasPressedThisFrame) Interact();
+                if (keyboard.jKey.wasPressedThisFrame && !traveling)
+                {
+                    traveling = true;
+                    WaterFx.GoToJellyRun(-1);
+                    return;
+                }
                 if (keyboard.zKey.wasPressedThisFrame) UndoValve();
                 if (keyboard.hKey.wasPressedThisFrame) HintValve();
                 if (keyboard.rKey.wasPressedThisFrame) RestartValvePuzzle();

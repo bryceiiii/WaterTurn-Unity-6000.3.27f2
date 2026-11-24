@@ -350,12 +350,23 @@ namespace WaterTurn
         public static IEnumerator Close(float seconds = IrisSeconds) =>
             Instance.IrisCloseRoutine(seconds);
 
+        /// <summary>True when a scene change is currently in flight.</summary>
+        public static bool Busy => instance != null && instance.transitioning;
+
         /// <summary>Iris in → black hold → load the level → iris out.</summary>
         public static void GoToLevel(int level)
         {
             var fx = Instance;
             if (fx.transitioning) return;
             fx.StartCoroutine(fx.GoRoutine(() => GameSession.EnterLevel(level)));
+        }
+
+        /// <summary>Iris in → black hold → load the jelly-run chapter hub.</summary>
+        public static void GoToJellyRun(int entrance)
+        {
+            var fx = Instance;
+            if (fx.transitioning) return;
+            fx.StartCoroutine(fx.GoRoutine(() => GameSession.EnterJellyRun(entrance)));
         }
 
         public static void GoToHub(int fromLevel)
