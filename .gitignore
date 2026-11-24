@@ -81,8 +81,9 @@ crashlytics-build.properties
 # 客户端配置见 ~/.workbuddy/mcp.json（http://127.0.0.1:8080/mcp）。
 /Packages/com.coplaydev.unity-mcp/
 
-# 转场/特效流程验证的临时截图（正式素材截图仍照常提交）
-/[Ss]creenshots/fx_*.png
+# 截图与文档：本地工作资料，不纳入版本库
+/[Ss]creenshots/
+/[Dd]ocs/
 
 # Unity MCP 本地服务器运行痕迹（PID/日志）
 /[Ll]ogs/mcp-*.log
@@ -96,3 +97,10 @@ Thumbs.db
 desktop.ini
 *.bak
 *~
+
+
+# 关卡预览合成图（本地校验用）
+/AgentScripts/preview_*.png
+
+# Play 模式抓帧（本地校验用）
+/AgentScripts/shots/

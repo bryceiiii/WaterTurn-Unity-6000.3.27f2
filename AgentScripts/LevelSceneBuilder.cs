@@ -409,7 +409,13 @@ namespace AgentBuild
             wallImage.sprite = Rounded;
             wallImage.raycastTarget = false;
             var rockImage = ImageOn(wall.transform, "Rock", new Color32(188, 202, 232, 255), rock, Image.Type.Simple);
-            rockImage.rectTransform.sizeDelta = new Vector2(100, 100);
+            // Rock 必须跟父级拉伸，否则写死尺寸会在不同 cell 的关卡里溢出/缩水
+            var rockRect = rockImage.rectTransform;
+            rockRect.anchorMin = Vector2.zero;
+            rockRect.anchorMax = Vector2.one;
+            rockRect.pivot = new Vector2(.5f, .5f);
+            rockRect.anchoredPosition = Vector2.zero;
+            rockRect.sizeDelta = new Vector2(-3, -3);
             prefabs.wall = SavePrefab(wall, "Assets/Prefabs/Board/Tile_Wall.prefab");
 
             // water
@@ -564,9 +570,8 @@ namespace AgentBuild
                 char tile = level.Tiles[p];
                 if (tile == '#')
                 {
-                    var wall = Instance(prefabs.wall, room, Point(p), new Vector2(cell + 1, cell + 1), "Wall " + p);
-                    var rock = wall.Find("Rock") as RectTransform;
-                    if (rock != null) rock.sizeDelta = new Vector2(cell, cell);
+                    // Rock 已在 prefab 里拉伸锚定，这里不要再覆盖它的 sizeDelta
+                    Instance(prefabs.wall, room, Point(p), new Vector2(cell + 1, cell + 1), "Wall " + p);
                 }
                 else
                     Instance(prefabs.floor, room, Point(p), new Vector2(cell - 2, cell - 2), "Floor " + p);
