@@ -30,6 +30,27 @@ namespace WaterTurn
         /// </summary>
         public readonly int Latch;
 
+        /// <summary>
+        /// 薄膜 'M'：水进不去（等于墙），鱼却能直接穿过去，所以它永远不是落脚点。
+        /// 和栅栏 'G'（水能过、鱼不能）正好互为反面，是第三章的教学骨架。
+        /// </summary>
+        public readonly bool HasMembrane;
+
+        /// <summary>
+        /// 泉眼 'o'：本身就是一格水，但永远不动——房间怎么转它都不掉。
+        /// 于是它是水面上唯一"不会走的桥"。
+        /// </summary>
+        public readonly bool HasSpring;
+
+        /// <summary>
+        /// 逆闸 'd'：默认常开，水压住感应格才关上。和 'D'（默认关、压住才开）语义相反，
+        /// 也没有 'D' 的杀伤力：它是一道水口，不是石门。
+        /// </summary>
+        public readonly bool HasInvertedGate;
+
+        /// <summary>鱼一次能连穿几格薄膜；上限只是防止环状盘面死循环。</summary>
+        public readonly int MembraneLimit;
+
         public bool HasPortal => Portal.Any(partner => partner >= 0);
         public bool HasLatch => Latch >= 0;
 
@@ -48,6 +69,10 @@ namespace WaterTurn
             Sensor = Tiles.IndexOf('S');
             Latch = Tiles.IndexOf('s');
             Pearl = Tiles.IndexOf('K');
+            HasMembrane = Tiles.IndexOf('M') >= 0;
+            HasSpring = Tiles.IndexOf('o') >= 0;
+            HasInvertedGate = Tiles.IndexOf('d') >= 0;
+            MembraneLimit = Width * Height;
 
             Portal = Enumerable.Repeat(-1, Tiles.Length).ToArray();
             var mouths = new List<int>();
@@ -70,12 +95,14 @@ namespace WaterTurn
             {
                 char tile = Tiles[p];
                 if (tile == 'P') rider = water.Count;
-                if (tile == 'P' || tile == '~' || tile == 'B' || tile == 'b') water.Add(p);
+                // 泉眼也是一格水：鱼能站，水不能挤进来，只是它永远不跟着房间滑。
+                if (tile == 'P' || tile == '~' || tile == 'B' || tile == 'b' || tile == 'o') water.Add(p);
                 if (tile == 'B' || tile == 'b') boxes.Add(p);
             }
             if (rider < 0 || Exit < 0) throw new ArgumentException(name);
             boxes.Sort();
-            Start = new Position(water.ToArray(), rider, boxes.ToArray(), 0, false, false);
+            // 逆闸默认常开，所以带 'd' 的关卡一开始门就是通的。
+            Start = new Position(water.ToArray(), rider, boxes.ToArray(), 0, HasInvertedGate, false);
         }
     }
 
@@ -116,7 +143,8 @@ namespace WaterTurn
         /// <summary>
         /// A gate is deadly to the fish (the water it lets through is not). Used
         /// both by the runtime death check and by the hint solver, so a hint can
-        /// never route the fish into a gate.
+        /// never route the fish into a gate. Only the stone gate 'D' kills: the
+        /// inverted gate 'd' is a shallow sill the fish simply swims through.
         /// </summary>
         public static bool OnGate(Level level, Position p) =>
             p != null && level.Tiles[p.Fish] == 'D';
@@ -132,6 +160,12 @@ namespace WaterTurn
 
             int direction = ((int)move - p.Turn + 4) % 4;
             int step = Step(level, p.Fish, direction);
+            if (step < 0) { block = Block.Dry; return null; }
+            // 薄膜：鱼直接穿过去，可以连穿几格——但膜里没有水，所以它只是过路，
+            // 落点仍必须是水格。
+            int membrane = 0;
+            while (step >= 0 && level.Tiles[step] == 'M' && membrane++ <= level.MembraneLimit)
+                step = Step(level, step, direction);
             if (step < 0) { block = Block.Dry; return null; }
             // 阀格对鱼同样生效。鱼可以顺着箭头游进去，侧着、逆着都会撞在阀门前；
             // 被水带着穿过阀格属于水的通行，不受这一条限制。
@@ -162,8 +196,8 @@ namespace WaterTurn
         {
             if (cell < 0) return false;
             char tile = level.Tiles[cell];
-            if (tile == '#' || tile == 'G' || tile == 'E') return false;
-            if (tile == 'D' && !p.Gate) return false;
+            if (tile == '#' || tile == 'G' || tile == 'E' || tile == 'M' || tile == 'o') return false;
+            if ((tile == 'D' || tile == 'd') && !p.Gate) return false;
             if (p.HasBox(cell)) return false;
             // 门格可以推上去：那就是把箱子当塞子用，门会失效。
             return true;
@@ -205,6 +239,10 @@ namespace WaterTurn
 
             int direction = ((int)move - p.Turn + 4) % 4;
             int step = Step(level, p.Fish, direction);
+            if (step < 0) return null;
+            int membrane = 0;
+            while (step >= 0 && level.Tiles[step] == 'M' && membrane++ <= level.MembraneLimit)
+                step = Step(level, step, direction);
             if (step < 0) return null;
             if (ArrowBlocks(level, step, direction)) return null;
 
@@ -250,6 +288,7 @@ namespace WaterTurn
                 var wet = new HashSet<int>(water);
                 foreach (int i in order)
                 {
+                    if (level.Tiles[water[i]] == 'o') continue;   // 泉眼不动
                     wet.Remove(water[i]);
                     int next = Step(level, water[i], direction);
                     while (next >= 0 && Free(level, next, gate) && !p.HasBox(next) && !wet.Contains(next))
@@ -273,8 +312,18 @@ namespace WaterTurn
             return new Position(water, p.Rider, p.Boxes, p.Turn, gate, p.Pearl || water[p.Rider] == level.Pearl);
         }
 
-        static bool Free(Level level, int cell, bool gate) =>
-            cell >= 0 && level.Tiles[cell] != '#' && (gate || level.Tiles[cell] != 'D');
+        /// <summary>
+        /// 水能不能占这一格。膜和泉眼都挡水：膜是筛子（只过鱼），泉眼是自己已经在冒水，
+        /// 没有第二格水的容身之处。石门 'D' 和逆闸 'd' 都只在"通水"状态下放行。
+        /// </summary>
+        static bool Free(Level level, int cell, bool gate)
+        {
+            if (cell < 0) return false;
+            char tile = level.Tiles[cell];
+            if (tile == '#' || tile == 'M' || tile == 'o') return false;
+            if ((tile == 'D' || tile == 'd') && !gate) return false;
+            return true;
+        }
 
         static int ArrowOf(char tile) =>
             tile == '^' ? 0 : tile == '>' ? 1 : tile == 'v' ? 2 : tile == '<' ? 3 : -1;
@@ -317,6 +366,8 @@ namespace WaterTurn
                 var wet = new HashSet<int>(water);
                 foreach (int i in order)
                 {
+                    // 泉眼不动：房间怎么转，它都还是那一格水。桥因此是"不会走"的。
+                    if (level.Tiles[water[i]] == 'o') continue;
                     wet.Remove(water[i]);
                     int cell = water[i];
                     int hops = 0;
@@ -350,6 +401,15 @@ namespace WaterTurn
                 }
 
                 pearl = p.Pearl || water[p.Rider] == level.Pearl;
+                if (level.HasInvertedGate)
+                {
+                    // 逆闸：门默认开着，水一压住感应格就关。门的状态在落定结束后才更新，
+                    // 所以"这一趟已经流过去的水"收不回来；反过来，门刚开也得等下一步
+                    // 才吃得到通行的便宜。这就是它和时效感应格 's'（同一步内反复收敛）
+                    // 的区别：它记住状态，跨回合生效。
+                    gate = level.Sensor < 0 || Array.IndexOf(water, level.Sensor) < 0;
+                    break;
+                }
                 if (level.Latch >= 0)
                 {
                     bool pressed = wet.Contains(level.Latch);

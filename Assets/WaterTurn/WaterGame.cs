@@ -47,6 +47,9 @@ namespace WaterTurn
         readonly List<int> plateCells = new List<int>();
         readonly List<Image> latchImages = new List<Image>();
         readonly List<int> latchCells = new List<int>();
+        readonly List<Image> sensorImages = new List<Image>();
+        readonly List<int> sensorCells = new List<int>();
+        readonly List<Image> invertedGates = new List<Image>();
         int index, unlocked, waterFrame = -1, foamFrame = -1;
         float cell;
         bool busy, won, dying;
@@ -493,6 +496,9 @@ namespace WaterTurn
             plateCells.Clear();
             latchImages.Clear();
             latchCells.Clear();
+            sensorImages.Clear();
+            sensorCells.Clear();
+            invertedGates.Clear();
             if (geometry == null || current == null) return;
 
             var layer = new GameObject("Mechanisms", typeof(RectTransform));
@@ -579,6 +585,78 @@ namespace WaterTurn
                     Box("Core", latch, cell * .30f, cell * .30f, new Color32(26, 38, 48, 255));
                     latchCells.Add(p);
                     latchImages.Add(latch.GetComponent<Image>());
+                }
+                else if (tile == 'M')
+                {
+                    // 薄膜：半透明的筛面。水进不来，鱼能直接穿过去，
+                    // 所以它画得比墙"薄"——看得见后面的地板，才像能穿。
+                    var film = Box("Membrane " + p, mechanismLayer, cell * .94f, cell * .94f,
+                        new Color32(150, 240, 235, 38));
+                    film.anchoredPosition = Point(p);
+                    float rib = Mathf.Max(2f, cell * .05f);
+                    for (int i = -1; i <= 1; i++)
+                    {
+                        Box("Rib V", film, rib, cell * .92f, new Color32(170, 246, 240, 120))
+                            .anchoredPosition = new Vector2(i * cell * .29f, 0);
+                        Box("Rib H", film, cell * .92f, rib, new Color32(170, 246, 240, 120))
+                            .anchoredPosition = new Vector2(0, i * cell * .29f);
+                    }
+                }
+                else if (tile == 'o')
+                {
+                    // 泉眼：画在水面之上的一圈石沿 + 中央水眼。它就是"钉住的水格"，
+                    // 房间转它也不挪窝，所以必须让玩家一眼认出这不是普通的一滩水。
+                    Vector2 center = Point(p);
+                    float thickness = Mathf.Max(2f, cell * .06f);
+                    float span = cell * .86f;
+                    var rim = new Color32(96, 214, 208, 210);
+                    for (int side = 0; side < 4; side++)
+                    {
+                        bool horizontal = side < 2;
+                        var bar = Box("Spring Rim", valveLayer,
+                            horizontal ? span : thickness, horizontal ? thickness : span, rim);
+                        bar.anchoredPosition = center + new Vector2(
+                            horizontal ? 0 : (side == 2 ? -1f : 1f) * span * .5f,
+                            horizontal ? (side == 0 ? 1f : -1f) * span * .5f : 0);
+                    }
+                    var eye = Box("Spring Eye " + p, valveLayer, cell * .20f, cell * .20f,
+                        new Color32(186, 250, 246, 220));
+                    eye.anchoredPosition = center;
+                    eye.localRotation = Quaternion.Euler(0, 0, 45);
+                }
+                else if (tile == 'd')
+                {
+                    // 逆闸：常开的水口。外框一直在，闸板开着时几乎透明、关上才实心——
+                    // 玩家因此能随时读出"这道水口现在是通是堵"。
+                    Vector2 center = Point(p);
+                    float edge = Mathf.Max(2f, cell * .07f);
+                    float span = cell * .88f;
+                    var frame = new Color32(96, 214, 208, 235);
+                    for (int side = 0; side < 4; side++)
+                    {
+                        bool horizontal = side < 2;
+                        var bar = Box("Inverted Frame", mechanismLayer,
+                            horizontal ? span : edge, horizontal ? edge : span, frame);
+                        bar.anchoredPosition = center + new Vector2(
+                            horizontal ? 0 : (side == 2 ? -1f : 1f) * span * .5f,
+                            horizontal ? (side == 0 ? 1f : -1f) * span * .5f : 0);
+                    }
+                    var slab = Box("Inverted Gate " + p, mechanismLayer, cell * .74f, cell * .74f,
+                        new Color32(120, 239, 234, 48));
+                    slab.anchoredPosition = center;
+                    invertedGates.Add(slab.GetComponent<Image>());
+                }
+                else if (tile == 'S')
+                {
+                    // 感应格：只有逆闸关卡的场景里是白模（其余关卡场景里摆的是预制体）。
+                    // 它画在水面之上——"水正压着它、门正关着"必须一眼看得见。
+                    var node = Box("Sensor " + p, valveLayer, cell * .62f, cell * .62f,
+                        new Color32(44, 68, 82, 255));
+                    node.anchoredPosition = Point(p);
+                    node.localRotation = Quaternion.Euler(0, 0, 45);
+                    Box("Core", node, cell * .28f, cell * .28f, new Color32(120, 239, 234, 150));
+                    sensorCells.Add(p);
+                    sensorImages.Add(node.GetComponent<Image>());
                 }
             }
         }
@@ -670,7 +748,8 @@ namespace WaterTurn
             {
                 "步数   " + history.Count,
                 current.Sensor >= 0 || current.Plates.Length > 0 || current.HasLatch
-                    ? "闸门   " + (position.Gate ? "已开" : "未开") : "水路   已接通",
+                    ? (current.HasInvertedGate ? "逆闸   " : "闸门   ") + (position.Gate ? "已开" : "未开")
+                    : "水路   已接通",
                 current.Pearl >= 0 ? "珍珠   " + (position.Pearl ? "1 / 1" : "0 / 1") : "评价   从容通过",
             };
             if (GameSession.InJellyRunChain)
@@ -724,6 +803,7 @@ namespace WaterTurn
                 hud.status.text =
                     block == Block.Crate ? "箱子前面没有可以推入的位置。" :
                     block == Block.Arrow ? "单向阀只放行顺着箭头的方向，鱼要沿箭头游进去。" :
+                    current.HasMembrane ? "鱼只能进入相邻的水格——薄膜能穿，但落点必须是水。" :
                     "鱼只能进入相邻的水格。";
                 return;
             }
@@ -783,9 +863,11 @@ namespace WaterTurn
             else
                 hud.status.text =
                     !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
+                    source.Gate && !result.Gate && current.HasInvertedGate
+                        ? "水压住了感应格，逆闸合上了 —— 先把水挪开。" :
                     !source.Gate && result.Gate ? (current.Plates.Length > 0 && !SameBoxes(source, result)
                         ? "箱子压住重压格，闸门已打开。"
-                        : "感应格进水，闸门已打开。") :
+                        : current.HasInvertedGate ? "感应格让开，逆闸重新放行。" : "感应格进水，闸门已打开。") :
                     result.Fish == current.Exit ? "先收集珍珠，出口才会开启。" :
                     !SameBoxes(source, result) ? "箱子已移位，留意新的水路。" : "水已落定。";
             if (won && index == unlocked && index < Campaign.VisibleLevels - 1)
@@ -827,6 +909,14 @@ namespace WaterTurn
                 latchImages[i].color = System.Array.IndexOf(target.Water, latchCells[i]) >= 0
                     ? new Color32(120, 239, 234, 255)
                     : new Color32(255, 188, 112, 255);
+            for (int i = 0; i < sensorImages.Count; i++)
+                sensorImages[i].color = System.Array.IndexOf(target.Water, sensorCells[i]) >= 0
+                    ? new Color32(120, 239, 234, 255)
+                    : new Color32(44, 68, 82, 255);
+            for (int i = 0; i < invertedGates.Count; i++)
+                invertedGates[i].color = target.Gate
+                    ? new Color32(120, 239, 234, 48)
+                    : new Color32(120, 239, 234, 232);
             if (fish != null)
             {
                 Vector2 from = Point(source.Fish), to = Point(target.Fish);
@@ -842,14 +932,18 @@ namespace WaterTurn
         void Refresh()
         {
             string gateState = current.Sensor < 0 && current.Plates.Length == 0 && !current.HasLatch
-                ? "" : "   ·   闸门" + (position.Gate ? "开" : "关");
+                ? "" : "   ·   " + (current.HasInvertedGate ? "逆闸" : "闸门") + (position.Gate ? "开" : "关");
             string pearlState = current.Pearl < 0 ? "" : "   ·   珍珠 " + (position.Pearl ? "1 / 1" : "0 / 1");
             hud.readout.text = "步数 " + history.Count + gateState + pearlState;
             hud.mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
                 (current.HasPortal ? "   ·   白框为传送门" : "") +
                 (current.HasLatch ? "   ·   琥珀菱格为时效感应" : "") +
-                (current.HasValve ? "   ·   白箭头为单向阀" : "") +                (current.Plates.Length == 0 ? "" : "   ·   灰格只认箱子") +
-                (current.Sensor < 0 ? "" : "   ·   青色为感应格") +
+                (current.HasValve ? "   ·   白箭头为单向阀" : "") +
+                (current.Plates.Length == 0 ? "" : "   ·   灰格只认箱子") +
+                (current.HasMembrane ? "   ·   细网为薄膜，鱼能穿" : "") +
+                (current.HasSpring ? "   ·   石沿水眼为泉眼，永不滑动" : "") +
+                (current.HasInvertedGate ? "   ·   青闸默认常开，水压感应格才关" : "") +
+                (current.Sensor >= 0 && !current.HasInvertedGate ? "   ·   青色为感应格" : "") +
                 (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
             // Clearing a chamber always returns to the tidal cave, so the panel
