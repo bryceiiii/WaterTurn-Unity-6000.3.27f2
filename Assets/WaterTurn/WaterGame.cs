@@ -39,8 +39,14 @@ namespace WaterTurn
         readonly Stack<Position> history = new Stack<Position>();
         RectTransform[] waters, foams;
         Image[] waterImages, foamImages;
-        RectTransform fish, crate, geometry;
+        RectTransform fish, geometry;
+        RectTransform[] crates;
         Image gate, pearl, sensor;
+        RectTransform mechanismLayer, valveLayer;
+        readonly List<Image> plateImages = new List<Image>();
+        readonly List<int> plateCells = new List<int>();
+        readonly List<Image> latchImages = new List<Image>();
+        readonly List<int> latchCells = new List<int>();
         int index, unlocked, waterFrame = -1, foamFrame = -1;
         float cell;
         bool busy, won, dying;
@@ -441,11 +447,12 @@ namespace WaterTurn
 
             fish = boardView.player;
             fishImage = fish != null ? fish.GetComponent<Image>() : null;
-            crate = boardView.crate;
+            crates = ResolveCrates();
             gate = boardView.gate;
             pearl = boardView.pearl;
             sensor = boardView.sensor;
             if (fishImage != null) fishImage.preserveAspect = true;
+            BuildMechanismViews();
 
             waterFrame = foamFrame = -1;
             leaving = dying = false;
@@ -454,6 +461,148 @@ namespace WaterTurn
             hud.status.text = "把鱼送到金色出口。";
             Refresh();
             ApplySidePanelHidden();
+        }
+
+        /// <summary>
+        /// 场景里可能只摆了一个箱子；把箱子数组补齐到这一关需要的数量。
+        /// 多出来的箱子是同一个预制体的副本，位置每帧由 <see cref="Paint"/> 摆。
+        /// </summary>
+        RectTransform[] ResolveCrates()
+        {
+            var list = new List<RectTransform>();
+            if (boardView.crates != null)
+                foreach (var view in boardView.crates)
+                    if (view != null) list.Add(view);
+            if (list.Count == 0 && boardView.crate != null) list.Add(boardView.crate);
+            if (list.Count == 0) return new RectTransform[0];
+            while (list.Count < position.Boxes.Length)
+                list.Add(Instantiate(list[0], list[0].parent));
+            return list.ToArray();
+        }
+
+        /// <summary>
+        /// 传送门和重压格先用白模：纯白门框 + 冷/暖内芯区分一对门，
+        /// 重压格是一块灰色凹槽，被箱子压住时转青。都是 Room 的子物体，
+        /// 所以跟着房间一起转，坐标和格子一一对应。
+        /// </summary>
+        void BuildMechanismViews()
+        {
+            if (mechanismLayer != null) Destroy(mechanismLayer.gameObject);
+            if (valveLayer != null) Destroy(valveLayer.gameObject);
+            plateImages.Clear();
+            plateCells.Clear();
+            latchImages.Clear();
+            latchCells.Clear();
+            if (geometry == null || current == null) return;
+
+            var layer = new GameObject("Mechanisms", typeof(RectTransform));
+            mechanismLayer = (RectTransform) layer.transform;
+            mechanismLayer.SetParent(geometry, false);
+            mechanismLayer.anchorMin = mechanismLayer.anchorMax = new Vector2(.5f, .5f);
+            mechanismLayer.pivot = new Vector2(.5f, .5f);
+            mechanismLayer.anchoredPosition = Vector2.zero;
+            mechanismLayer.sizeDelta = Vector2.zero;
+            // 白模要压在地板之上、水/箱子/鱼之下，否则箱子塞住门时会整个被门框盖住。
+            int firstWater = int.MaxValue;
+            if (waters != null)
+                foreach (var body in waters)
+                    if (body != null) firstWater = Mathf.Min(firstWater, body.GetSiblingIndex());
+            if (firstWater != int.MaxValue) mechanismLayer.SetSiblingIndex(firstWater);
+
+            // 阀单独一层，插在最后一片水之后：水停进阀格时箭头仍然浮在水面上，
+            // 否则玩家看到的就是「一滩水盖住了阀门」，看不出这个朝向通不通。
+            var valveRoot = new GameObject("Valves", typeof(RectTransform));
+            valveLayer = (RectTransform) valveRoot.transform;
+            valveLayer.SetParent(geometry, false);
+            valveLayer.anchorMin = valveLayer.anchorMax = new Vector2(.5f, .5f);
+            valveLayer.pivot = new Vector2(.5f, .5f);
+            valveLayer.anchoredPosition = Vector2.zero;
+            valveLayer.sizeDelta = Vector2.zero;
+            int lastWater = -1;
+            if (waters != null)
+                foreach (var body in waters)
+                    if (body != null) lastWater = Mathf.Max(lastWater, body.GetSiblingIndex());
+            if (lastWater >= 0) valveLayer.SetSiblingIndex(lastWater + 1);
+
+            for (int p = 0; p < current.Tiles.Length; p++)
+            {
+                char tile = current.Tiles[p];
+                if (tile == '1' || tile == '2')
+                {
+                    var tint = tile == '1'
+                        ? new Color32(198, 240, 255, 255)
+                        : new Color32(232, 196, 255, 255);
+                    var frame = Box("Portal " + tile, mechanismLayer, cell * .86f, cell * .86f,
+                        new Color32(246, 251, 255, 255));
+                    frame.anchoredPosition = Point(p);
+                    var mouth = Box("Mouth", frame, cell * .56f, cell * .56f, new Color32(18, 30, 40, 255));
+                    Box("Core", mouth, cell * .32f, cell * .32f, tint);
+                }
+                else if (tile == 'X')
+                {
+                    // 重压格：灰色凹槽，不能和白色的门框混淆。
+                    var plate = Box("Plate " + p, mechanismLayer, cell * .80f, cell * .52f,
+                        new Color32(134, 152, 166, 255));
+                    plate.anchoredPosition = Point(p);
+                    Box("Inset", plate, cell * .62f, cell * .34f, new Color32(22, 34, 44, 255));
+                    plateCells.Add(p);
+                    plateImages.Add(plate.GetComponent<Image>());
+                }
+                else if (tile == '^' || tile == 'v' || tile == '>' || tile == '<')
+                {
+                    // 单向阀：深色方槽 + 一支白箭头。箭头跟着房间转，
+                    // 所以玩家能直接从画面上看出「这个朝向下水能不能过」。
+                    int dir = tile == '^' ? 0 : tile == '>' ? 1 : tile == 'v' ? 2 : 3;
+                    var socket = Box("Valve " + tile, valveLayer, cell * .74f, cell * .74f,
+                        new Color32(28, 42, 52, 255));
+                    socket.anchoredPosition = Point(p);
+                    var arrow = new GameObject("Arrow", typeof(RectTransform));
+                    var shaft = (RectTransform)arrow.transform;
+                    shaft.SetParent(socket, false);
+                    shaft.anchorMin = shaft.anchorMax = new Vector2(.5f, .5f);
+                    shaft.pivot = new Vector2(.5f, .5f);
+                    shaft.sizeDelta = Vector2.zero;
+                    shaft.localRotation = Quaternion.Euler(0, 0, dir == 0 ? 0 : dir == 1 ? -90 : dir == 2 ? 180 : 90);
+                    Box("Stem", shaft, cell * .11f, cell * .34f, new Color32(150, 245, 240, 255))
+                        .anchoredPosition = new Vector2(0, -cell * .10f);
+                    var tip = Box("Tip", shaft, cell * .24f, cell * .24f, new Color32(150, 245, 240, 255));
+                    tip.anchoredPosition = new Vector2(0, cell * .16f);
+                    tip.localRotation = Quaternion.Euler(0, 0, 45);
+                }
+                else if (tile == 's')
+                {
+                    // 时效感应格：琥珀色菱形，压住时转青——和闸门同色系，暗示它直接驱动闸门。
+                    var latch = Box("Latch " + p, mechanismLayer, cell * .58f, cell * .58f,
+                        new Color32(255, 188, 112, 255));
+                    latch.anchoredPosition = Point(p);
+                    latch.localRotation = Quaternion.Euler(0, 0, 45);
+                    Box("Core", latch, cell * .30f, cell * .30f, new Color32(26, 38, 48, 255));
+                    latchCells.Add(p);
+                    latchImages.Add(latch.GetComponent<Image>());
+                }
+            }
+        }
+
+        RectTransform Box(string name, Transform parent, float width, float height, Color color)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            var rect = go.GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
+            rect.pivot = new Vector2(.5f, .5f);
+            rect.sizeDelta = new Vector2(width, height);
+            var image = go.AddComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            return rect;
+        }
+
+        static bool SameBoxes(Position a, Position b)
+        {
+            if (a.Boxes.Length != b.Boxes.Length) return false;
+            for (int i = 0; i < a.Boxes.Length; i++)
+                if (a.Boxes[i] != b.Boxes[i]) return false;
+            return true;
         }
 
         /// <summary>The panel starts collapsed, so the level opens at full size.</summary>
@@ -520,7 +669,8 @@ namespace WaterTurn
             var lines = new List<string>
             {
                 "步数   " + history.Count,
-                current.Sensor >= 0 ? "闸门   " + (position.Gate ? "已开" : "未开") : "水路   已接通",
+                current.Sensor >= 0 || current.Plates.Length > 0 || current.HasLatch
+                    ? "闸门   " + (position.Gate ? "已开" : "未开") : "水路   已接通",
                 current.Pearl >= 0 ? "珍珠   " + (position.Pearl ? "1 / 1" : "0 / 1") : "评价   从容通过",
             };
             if (GameSession.InJellyRunChain)
@@ -571,7 +721,10 @@ namespace WaterTurn
                         return;
                     }
                 }
-                hud.status.text = block == Block.Crate ? "箱子前面没有可以推入的位置。" : "鱼只能进入相邻的水格。";
+                hud.status.text =
+                    block == Block.Crate ? "箱子前面没有可以推入的位置。" :
+                    block == Block.Arrow ? "单向阀只放行顺着箭头的方向，鱼要沿箭头游进去。" :
+                    "鱼只能进入相邻的水格。";
                 return;
             }
             // Rotating is always allowed, even when the turn would carry the fish
@@ -630,9 +783,11 @@ namespace WaterTurn
             else
                 hud.status.text =
                     !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
-                    !source.Gate && result.Gate ? "感应格进水，闸门已打开。" :
+                    !source.Gate && result.Gate ? (current.Plates.Length > 0 && !SameBoxes(source, result)
+                        ? "箱子压住重压格，闸门已打开。"
+                        : "感应格进水，闸门已打开。") :
                     result.Fish == current.Exit ? "先收集珍珠，出口才会开启。" :
-                    source.Box != result.Box ? "箱子已移位，留意新的水路。" : "水已落定。";
+                    !SameBoxes(source, result) ? "箱子已移位，留意新的水路。" : "水已落定。";
             if (won && index == unlocked && index < Campaign.VisibleLevels - 1)
             {
                 unlocked++;
@@ -655,8 +810,23 @@ namespace WaterTurn
                 if (waterGlows != null && i < waterGlows.Length && waterGlows[i] != null)
                     waterGlows[i].rectTransform.anchoredPosition = waters[i].anchoredPosition;
             }
-            if (crate != null && source.Box >= 0 && target.Box >= 0)
-                crate.anchoredPosition = Vector2.Lerp(Point(source.Box), Point(target.Box), fraction);
+            for (int i = 0; i < crates.Length; i++)
+            {
+                int from = i < source.Boxes.Length ? source.Boxes[i] : -1;
+                int to = i < target.Boxes.Length ? target.Boxes[i] : -1;
+                if (to < 0) continue;
+                crates[i].anchoredPosition = from >= 0
+                    ? Vector2.Lerp(Point(from), Point(to), fraction)
+                    : Point(to);
+            }
+            for (int i = 0; i < plateImages.Count; i++)
+                plateImages[i].color = target.HasBox(plateCells[i])
+                    ? new Color32(120, 239, 234, 255)
+                    : new Color32(134, 152, 166, 255);
+            for (int i = 0; i < latchImages.Count; i++)
+                latchImages[i].color = System.Array.IndexOf(target.Water, latchCells[i]) >= 0
+                    ? new Color32(120, 239, 234, 255)
+                    : new Color32(255, 188, 112, 255);
             if (fish != null)
             {
                 Vector2 from = Point(source.Fish), to = Point(target.Fish);
@@ -671,10 +841,14 @@ namespace WaterTurn
 
         void Refresh()
         {
-            string gateState = current.Sensor < 0 ? "" : "   ·   闸门" + (position.Gate ? "开" : "关");
+            string gateState = current.Sensor < 0 && current.Plates.Length == 0 && !current.HasLatch
+                ? "" : "   ·   闸门" + (position.Gate ? "开" : "关");
             string pearlState = current.Pearl < 0 ? "" : "   ·   珍珠 " + (position.Pearl ? "1 / 1" : "0 / 1");
             hud.readout.text = "步数 " + history.Count + gateState + pearlState;
             hud.mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
+                (current.HasPortal ? "   ·   白框为传送门" : "") +
+                (current.HasLatch ? "   ·   琥珀菱格为时效感应" : "") +
+                (current.HasValve ? "   ·   白箭头为单向阀" : "") +                (current.Plates.Length == 0 ? "" : "   ·   灰格只认箱子") +
                 (current.Sensor < 0 ? "" : "   ·   青色为感应格") +
                 (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;

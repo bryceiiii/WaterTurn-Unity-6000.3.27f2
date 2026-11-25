@@ -192,6 +192,7 @@ namespace WaterTurn
 
             BuildDoor();
             BuildJellies();
+            BuildWellValve();
             BuildSwitch();
             BuildEntrances();
             BuildPortal();
@@ -270,6 +271,25 @@ namespace WaterTurn
                 view.bodyRect = bodyRt;
                 jellies.Add(view);
             }
+        }
+
+        void BuildWellValve()
+        {
+            var valve = JellyRunData.Jellies[9].valve;
+            wellValveGlow = WorldImage("Well Valve Glow", JellyRunArt.Glow, new Color(1f, .82f, .45f, .22f),
+                valve.x, valve.y, 92f, 92f);
+            wellValveRing = WorldImage("Well Valve Ring", JellyRunArt.Ring, new Color(1f, .82f, .45f, .75f),
+                valve.x, valve.y, 42f, 42f);
+            wellValveRingRect = wellValveRing.rectTransform;
+            WorldImage("Well Valve Hub", JellyRunArt.Circle, new Color(1f, .90f, .62f, .95f),
+                valve.x, valve.y, 13f, 13f);
+            wellValveLabel = WorldText(null, "Well Valve Label", "阀门", 11,
+                new Color(1f, .88f, .58f, .95f), TextAnchor.MiddleCenter, valve.x, valve.y - 28f, 100f, 18f);
+            wellValveLabel.fontStyle = FontStyle.Bold;
+
+            var shaftHint = WorldText(null, "Shaft Hint", "石墙顶可落脚 ↑", 11,
+                new Color(.65f, 1f, .92f, .85f), TextAnchor.MiddleCenter, 4240f, 440f, 180f, 18f);
+            shaftHint.fontStyle = FontStyle.Bold;
         }
 
         void BuildSwitch()
@@ -505,6 +525,7 @@ namespace WaterTurn
 
             UpdateBackground();
             UpdateJellies(dt);
+            UpdateWellValve();
             UpdateSaws();
             UpdateDoor();
             UpdateSwitch();
@@ -604,6 +625,24 @@ namespace WaterTurn
                 ? new Color(1f, .83f, .47f, .95f)
                 : new Color(.55f, .96f, .92f, .55f + pulse * .2f);
             switchView.crystal.localScale = Vector3.one * (1f + pulse * .08f + switchView.pulse * .35f);
+        }
+
+        void UpdateWellValve()
+        {
+            if (wellValveRing == null) return;
+            bool flooded = jellies.Count > 9 && jellies[9].flooded;
+            float pulse = .5f + .5f * Mathf.Sin(time * 2.2f);
+            wellValveGlow.color = flooded
+                ? new Color(1f, .78f, .42f, .42f)
+                : new Color(1f, .82f, .45f, .20f + pulse * .10f);
+            wellValveRing.color = flooded
+                ? new Color(1f, .88f, .58f, .95f)
+                : new Color(1f, .82f, .45f, .62f + pulse * .18f);
+            wellValveRingRect.localRotation = Quaternion.Euler(0f, 0f, time * (flooded ? 48f : 18f));
+            wellValveLabel.text = flooded ? "潮水已开" : "阀门";
+            wellValveLabel.color = flooded
+                ? new Color(1f, .90f, .62f, .95f)
+                : new Color(1f, .88f, .58f, .80f);
         }
 
         void UpdateEntrances(float dt)

@@ -20,7 +20,10 @@ namespace WaterTurn
         public RectTransform[] foam = new RectTransform[0];
 
         public RectTransform player;
+        [Tooltip("旧关卡只有一个箱子时用这个字段；新关卡请填 crates。")]
         public RectTransform crate;
+        [Tooltip("箱子，顺序和 Position.Boxes 一致（升序）。")]
+        public RectTransform[] crates = new RectTransform[0];
         public Image gate;
         public Image sensor;
         public Image pearl;

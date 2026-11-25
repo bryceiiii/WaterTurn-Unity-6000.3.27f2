@@ -80,6 +80,10 @@ namespace WaterTurn
         readonly List<Image> shafts = new List<Image>();
         readonly List<Image> motes = new List<Image>();
         Image redFlash;
+        Image wellValveGlow, wellValveRing;
+        RectTransform wellValveRingRect;
+        Text wellValveLabel;
+        bool wellHintShown;
 
         sealed class JellyView
         {
@@ -331,7 +335,11 @@ namespace WaterTurn
             else if (ix != 0) facing = ix > 0 ? FishFacing.Right : FishFacing.Left;
 
             if (j.spec.valve != Vector2.zero && !j.flooded)
-                if (Vector2.Distance(fishPos, j.spec.valve) < 46f) StartFlood(j);
+            {
+                var valve = j.spec.valve;
+                if (Mathf.Abs(fishPos.x - valve.x) < 70f && Mathf.Abs(fishPos.y - valve.y) < 60f)
+                    StartFlood(j);
+            }
 
             if (jumpQueued)
             {
@@ -542,6 +550,11 @@ namespace WaterTurn
             checkpointJelly = index;
             checkpoint = new Vector2(j.x + j.w * .5f, j.y + Mathf.Min(j.h * .5f, 55f));
             moisture = Mathf.Min(100f, moisture + 45f);
+            if (index == 9 && !j.flooded && !wellHintShown)
+            {
+                wellHintShown = true;
+                ShowToast("井底有个阀门 · 潜到最深处碰它，潮水会把你托上去");
+            }
         }
 
         void StartFlood(JellyView j)
@@ -854,6 +867,7 @@ namespace WaterTurn
             entering = false;
             jumpQueued = false;
             interactQueued = false;
+            wellHintShown = false;
         }
 
         void SpawnAtEntrance(int entrance)
@@ -924,6 +938,7 @@ namespace WaterTurn
         public void DebugEnterChapter(int chapter) { phase = Phase.Play; nearestEntrance = -1; EnterChapter(chapter); }
         public void DebugInteract() { interactQueued = true; }
         public void DebugJump() { jumpQueued = true; }
+        public void DebugSetCharge(float value) { charge = Mathf.Clamp01(value); }
         public void DebugPlaceOnEntrance(int index)
         {
             if (index < 0 || index >= JellyRunData.Entrances.Length) return;
