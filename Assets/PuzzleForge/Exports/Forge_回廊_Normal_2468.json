@@ -1,0 +1,101 @@
+{
+    "packName": "Forge_回廊_Normal_2468",
+    "savedAt": "2026-11-26 14:49:05",
+    "spec": {
+        "theme": 0,
+        "difficulty": 1,
+        "rules": {
+            "crates": true,
+            "portals": true,
+            "valves": false,
+            "sensorGates": false,
+            "plates": false,
+            "membranes": false,
+            "springs": false
+        },
+        "levelCount": 3,
+        "hintMode": 1,
+        "winRule": 0,
+        "moveLimit": 24,
+        "seed": 2468,
+        "titlePrefix": "回廊",
+        "authorHint": ""
+    },
+    "levels": [
+        {
+            "name": "回廊 01",
+            "hint": "先转 3 次把水铺到出口那侧，再走 3 步过去。",
+            "answerNote": "",
+            "rows": [
+                "#########",
+                "#.E...#B#",
+                "##......#",
+                "#.......#",
+                "#.#...#.#",
+                "#~~~~~~.#",
+                "#~~~~~~~#",
+                "#~~~~P~~#",
+                "#########"
+            ],
+            "solution": "003444",
+            "steps": 6,
+            "solvable": true,
+            "issue": "",
+            "theme": 0,
+            "difficulty": 1,
+            "winRule": 0,
+            "moveLimit": 0,
+            "seed": 19544109
+        },
+        {
+            "name": "回廊 02",
+            "hint": "门是双向的：先让水流进门，从另一头冒出来再往下落。",
+            "answerNote": "",
+            "rows": [
+                "#########",
+                "#2.##.1.#",
+                "#.......#",
+                "#.......#",
+                "#~E.....#",
+                "##~~~~~~#",
+                "#~~~~~~~#",
+                "#~~#~~~P#",
+                "#########"
+            ],
+            "solution": "3444",
+            "steps": 4,
+            "solvable": true,
+            "issue": "",
+            "theme": 0,
+            "difficulty": 1,
+            "winRule": 0,
+            "moveLimit": 0,
+            "seed": 19648838
+        },
+        {
+            "name": "回廊 03",
+            "hint": "门是双向的：先让水流进门，从另一头冒出来再往下落。",
+            "answerNote": "",
+            "rows": [
+                "#########",
+                "#.#.E.1.#",
+                "#...2...#",
+                "#.......#",
+                "##~.....#",
+                "#~~~~~~~#",
+                "#~~~~~~##",
+                "#~~~~P~##",
+                "#########"
+            ],
+            "solution": "00144",
+            "steps": 5,
+            "solvable": true,
+            "issue": "",
+            "theme": 0,
+            "difficulty": 1,
+            "winRule": 0,
+            "moveLimit": 0,
+            "seed": 19753567
+        }
+    ]
+}
