@@ -135,17 +135,20 @@ Unity 6 **6000.3.27f2**（22188f149405），Universal 2D URP，Windows 桌面原
 - 五处潮心分别对应 **潮池 01–04 / 断桥 05–08 / 水闸 09–12 / 尖刺走廊 13–16 / 终章 17–20**。站上石台、靠近潮心按 `E` 才会进入；跳跃、下落擦过不会触发。进入后连打 4 关：通关结算后自动进入下一关，第 4 关后回到同一处潮心。中途 `Esc` 回本场景，再进入从本章第一个未通关的关卡继续。
 - 水闸竖井左侧那面石墙顶已从 y=300 降到 y=480：潜到水面或蓄满力从池底都能跳上墙顶 / 跳进竖井；井底阀门现在有可见的轮盘和“阀门”标签，落入井中会涨潮把你托到出口高度。
 - 20 个关卡位全部通过后，终点漩涡变金色并开启；结算显示用时、失误、20/20、5/5。JellyRun 的完成度独立保存在 `WaterTurn.JellyRun.Cleared.v1`，不依赖旧存档的 `LevelsCleared`。
-- 入口石台位置：潮池 (600,580)、断桥 (2575,684)、水闸 (3905,644)、尖刺走廊 (5055,684)、终章 (7265,174)；编辑器菜单 `WaterTurn/JellyRun/校验入口布局` 会检查 5 处入口、20 关映射和最小间距。
-- 场景美术（洞窟、岩体、果冻、尖刺、锯片、闸门、机关、潮心、终点、HUD）全部在运行时按 HTML 的配色/形状生成，不新增图片；小鱼使用工程已有的 `FishArt` 48×48 像素帧（Swim / Jump / Death），与 Hub、关卡里的鱼是同一套素材。
+- 入口石台位置：潮池 (600,580)、断桥 (2575,684)、水闸 (3905,644)、尖刺走廊 (5055,684)、终章 (7265,174)；编辑器菜单 `WaterTurn/JellyRun/校验入口布局与场景` 会检查 5 处入口、20 关映射、最小间距和场景预制体引用。
+- 场景美术（洞窟、岩体、果冻、尖刺、锯片、闸门、机关、潮心、终点）现在是 `Assets/Prefabs/JellyRun` 下的预制体实例，摆在 `JellyRun.unity` 的 `JellyRunCanvas/World` 下：可以直接在 Scene 里拖动位置、缩放尺寸、增删对象，Play 时物理从场景里的 RectTransform 读取。HUD、视差背景、小鱼动画、粒子和音效仍是运行时生成。小鱼使用工程已有的 `FishArt` 48×48 像素帧（Swim / Jump / Death），与 Hub、关卡里的鱼是同一套素材。
+- 场景编辑流程：改完后直接 Play；需要回到 HTML 数据时用 `WaterTurn/JellyRun/重建场景（覆盖手动修改）`。`WaterTurn/JellyRun/校验入口布局与场景` 会同时检查 5 处潮心、20 关映射、预制体数量和缺失引用；`刷新场景美术` 可在停止 Play 后重建程序化贴图。注意：重建会覆盖场景里的手动修改。
 - 与 `runScence` 分支里旧的“20 段连续走廊”原型无关，不合并、不覆盖。
 
 ## 工程入口
 
 - `Assets/WaterTurn/HubGame.cs` · 序章洞穴：程序化绘制的水潭、岩石、海草传送门、石门和可自由游动的小鱼（精灵来自 `Art/Fish`）。
-- `Assets/WaterTurn/JellyRunGame.cs` / `.Build.cs` / `.Hud.cs` · 果冻潮池横版场景：物理、五处潮心、章节链、HUD、镜头。
-- `Assets/WaterTurn/JellyRunData.cs` · 复刻自 HTML 的关卡表、入口石台和布局校验。
+- `Assets/WaterTurn/JellyRunGame.cs` / `.Build.cs` / `.Scene.cs` / `.Hud.cs` · 果冻潮池横版场景：物理、五处潮心、章节链、HUD、镜头；`.Scene.cs` 负责从场景预制体绑定物理数据。
+- `Assets/WaterTurn/JellyRunData.cs` · 复刻自 HTML 的关卡表、入口石台和布局校验，作为首次烘焙的模板。
 - `Assets/WaterTurn/JellyRunArt.cs` / `JellyRunGraphic.cs` / `JellyRunAudio.cs` · 程序化美术、果冻网格、音效。
-- `Assets/Editor/JellyRunSceneTools.cs` · 菜单 `WaterTurn/JellyRun/重建场景`、校验入口、清空完成度。
+- `Assets/WaterTurn/JellyRun*View.cs` / `JellyRunLevelBoard.cs` / `JellyRunSpawn.cs` · 可在 Scene 里编辑的视图组件：Floor / Ledge / Spike / Jelly / Entrance / Saw / Door / Switch / Portal / Valve / Spawn。
+- `Assets/Editor/JellyRunSceneBaker.cs` · 菜单 `WaterTurn/JellyRun/烘焙场景与预制体`，从 HTML 数据生成预制体和场景实例。
+- `Assets/Editor/JellyRunSceneTools.cs` · 菜单 `重建场景（覆盖手动修改）`、`校验入口布局与场景`、`清空入口进度`。
 - `Assets/WaterTurn/FishArt.cs` · 小鱼四方向游动、跳跃、死亡帧的加载与帧计时；`FishArt.Jump` 已用于果冻潮池，并修正了 `Resources/Art/Fish/Jump` 子目录路径。
 - `Assets/WaterTurn/WaterFx.cs` · 光圈转场、死亡闪白/冲击环/菱形碎裂/像素碎片、通关云朵卡片与失焦背景。
 - `Assets/WaterTurn/HubPortalAnchor.cs` · 可拖动的关卡入口锚点；Scene 视图 Gizmos 显示编号、关名和颜色。

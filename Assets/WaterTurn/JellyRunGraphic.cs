@@ -57,7 +57,7 @@ namespace WaterTurn
                 for (int i = 0; i <= cols; i++)
                 {
                     float p = i / (float)cols;
-                    float x = cx + (p - .5f) * w * halfWide[j];
+                    float x = cx + (p - .5f) * w * halfWide[j] * 2f;
                     float surface = top - SurfaceY(p);
                     float y = Mathf.Lerp(surface, bottom, t);
                     if (j == 0) y = surface;

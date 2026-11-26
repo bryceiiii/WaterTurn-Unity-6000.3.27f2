@@ -84,6 +84,43 @@ namespace WaterTurn
             return platforms[index];
         }
 
+        static readonly Dictionary<string, Sprite> dynamicSprites = new Dictionary<string, Sprite>();
+
+        /// <summary>
+        /// Size-keyed floor sprite for hand-placed floor prefabs.  Unlike
+        /// <see cref="Floor(int)"/> this is not tied to the HTML table, so an
+        /// authored floor can be resized in the Scene view and still look right.
+        /// </summary>
+        public static Sprite FloorSprite(int width, int height, bool ceiling)
+        {
+            width = Mathf.Max(4, width); height = Mathf.Max(4, height);
+            string key = "F" + width + "x" + height + (ceiling ? "c" : "f");
+            if (dynamicSprites.TryGetValue(key, out var cached) && cached != null) return cached;
+            var sprite = MakeFloor(new JellyRunData.RectF(0, ceiling ? 0 : 2, width, height));
+            dynamicSprites[key] = sprite;
+            return sprite;
+        }
+
+        public static Sprite LedgeSprite(int width)
+        {
+            width = Mathf.Max(16, width);
+            string key = "L" + width;
+            if (dynamicSprites.TryGetValue(key, out var cached) && cached != null) return cached;
+            var sprite = MakePlatform(new JellyRunData.RectF(0, 0, width, 16));
+            dynamicSprites[key] = sprite;
+            return sprite;
+        }
+
+        public static Sprite SpikeSprite(int width, int height, bool up)
+        {
+            width = Mathf.Max(4, width); height = Mathf.Max(4, height);
+            string key = "S" + width + "x" + height + (up ? "u" : "d");
+            if (dynamicSprites.TryGetValue(key, out var cached) && cached != null) return cached;
+            var sprite = MakeSpike(new JellyRunData.SpikeF(0, 0, width, height, up));
+            dynamicSprites[key] = sprite;
+            return sprite;
+        }
+
         /// <summary>
         /// Drops the cache and releases the generated objects.  Called from the
         /// play-mode entry point so a second Play press gets fresh, live sprites
@@ -102,6 +139,7 @@ namespace WaterTurn
             floors = null; platforms = null; spikes = null; caves = null; stalactites = null;
             solid = rounded = circle = dot = glow = ring = ellipse = pearl = diamond = null;
             vignette = shaft = beam = saw = redVignette = background = bottomGlow = null;
+            dynamicSprites.Clear();
         }
 
         // "== null" is Unity's overload, so objects destroyed at the end of the

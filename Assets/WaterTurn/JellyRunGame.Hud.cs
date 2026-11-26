@@ -300,7 +300,7 @@ namespace WaterTurn
             bool show = phase == Phase.Play && !helpOpen && nearestEntrance >= 0;
             promptGroup.alpha = Mathf.MoveTowards(promptGroup.alpha, show ? 1f : 0f, Time.unscaledDeltaTime * 7f);
             if (!show) return;
-            var e = JellyRunData.Entrances[nearestEntrance];
+            var e = entrances[nearestEntrance].spec;
             int done = 0;
             for (int i = e.FirstLevel; i <= e.LastLevel; i++) if (LevelCleared(i)) done++;
             bool complete = done >= 4;

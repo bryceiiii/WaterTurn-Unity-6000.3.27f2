@@ -19,7 +19,18 @@ namespace WaterTurn
             font = LoadFont();
             BuildCanvas();
             BuildBackground();
-            BuildWorld();
+
+            var board = FindFirstObjectByType<JellyRunLevelBoard>();
+            if (board != null)
+            {
+                if (board.worldRect != null) worldRoot = board.worldRect;
+                BindSceneWorld(board);
+            }
+            else
+            {
+                BuildWorld();
+            }
+
             sfx = gameObject.AddComponent<JellyRunAudio>();
             sfx.Init(muted);
             BuildHud();
@@ -35,30 +46,88 @@ namespace WaterTurn
 
         void BuildCanvas()
         {
-            var canvasGo = new GameObject("JellyRunCanvas", typeof(RectTransform), typeof(Canvas),
-                typeof(CanvasScaler), typeof(GraphicRaycaster));
-            canvasGo.transform.SetParent(transform, false);
+            var canvasTransform = transform.Find("JellyRunCanvas");
+            GameObject canvasGo;
+            if (canvasTransform != null)
+            {
+                canvasGo = canvasTransform.gameObject;
+            }
+            else
+            {
+                canvasGo = new GameObject("JellyRunCanvas", typeof(RectTransform), typeof(Canvas),
+                    typeof(CanvasScaler), typeof(GraphicRaycaster));
+                canvasGo.transform.SetParent(transform, false);
+            }
+
             canvas = canvasGo.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            if (canvas == null) canvas = canvasGo.AddComponent<Canvas>();
+            var viewCamera = Camera.main;
+            if (viewCamera == null) viewCamera = FindFirstObjectByType<Camera>();
+            if (viewCamera != null)
+            {
+                viewCamera.orthographic = true;
+                viewCamera.orthographicSize = JellyRunData.ViewH * .5f;
+                viewCamera.cullingMask = -1;
+                viewCamera.clearFlags = CameraClearFlags.SolidColor;
+                viewCamera.backgroundColor = new Color(.027f, .078f, .114f, 1f);
+                viewCamera.transform.position = new Vector3(0f, 0f, -10f);
+            }
+            // A World Space canvas at the 960x540 design size is visible in the
+            // Scene view, so the prefab instances can actually be dragged there.
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = viewCamera;
             canvas.sortingOrder = 100;
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(JellyRunData.ViewW, JellyRunData.ViewH);
-            scaler.matchWidthOrHeight = .5f;
             canvasRect = (RectTransform)canvasGo.transform;
+            canvasRect.anchorMin = canvasRect.anchorMax = new Vector2(.5f, .5f);
+            canvasRect.pivot = new Vector2(.5f, .5f);
+            canvasRect.sizeDelta = new Vector2(JellyRunData.ViewW, JellyRunData.ViewH);
+            canvasRect.localScale = Vector3.one;
+            canvasRect.anchoredPosition = Vector2.zero;
+            canvasRect.localPosition = Vector3.zero;
+
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            if (scaler == null) scaler = canvasGo.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+            scaler.scaleFactor = 1f;
+            scaler.referenceResolution = new Vector2(JellyRunData.ViewW, JellyRunData.ViewH);
+            if (canvasGo.GetComponent<GraphicRaycaster>() == null)
+                canvasGo.AddComponent<GraphicRaycaster>();
 
             if (FindFirstObjectByType<EventSystem>() == null)
                 new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
 
-            bgRoot = Stretch("Background");
-            worldRoot = new GameObject("World", typeof(RectTransform)).GetComponent<RectTransform>();
-            worldRoot.SetParent(canvasRect, false);
-            worldRoot.anchorMin = worldRoot.anchorMax = new Vector2(0f, 1f);
-            worldRoot.pivot = new Vector2(0f, 1f);
-            worldRoot.sizeDelta = new Vector2(JellyRunData.WorldW, JellyRunData.WorldH);
-            worldRoot.anchoredPosition = Vector2.zero;
+            var existingBg = canvasRect.Find("Background");
+            bgRoot = existingBg != null ? (RectTransform)existingBg : Stretch("Background");
 
-            hudRoot = Stretch("Hud");
+            var board = FindFirstObjectByType<JellyRunLevelBoard>();
+            if (board != null)
+            {
+                worldRoot = board.worldRect != null ? board.worldRect : (RectTransform)board.transform;
+            }
+            else
+            {
+                var existingWorld = canvasRect.Find("World");
+                if (existingWorld != null)
+                {
+                    worldRoot = (RectTransform)existingWorld;
+                }
+                else
+                {
+                    worldRoot = new GameObject("World", typeof(RectTransform)).GetComponent<RectTransform>();
+                    worldRoot.SetParent(canvasRect, false);
+                    worldRoot.anchorMin = worldRoot.anchorMax = new Vector2(0f, 1f);
+                    worldRoot.pivot = new Vector2(0f, 1f);
+                    worldRoot.sizeDelta = new Vector2(JellyRunData.WorldW, JellyRunData.WorldH);
+                    worldRoot.anchoredPosition = Vector2.zero;
+                }
+            }
+
+            var existingHud = canvasRect.Find("Hud");
+            hudRoot = existingHud != null ? (RectTransform)existingHud : Stretch("Hud");
+
+            bgRoot.SetSiblingIndex(0);
+            worldRoot.SetSiblingIndex(1);
+            hudRoot.SetSiblingIndex(canvasRect.childCount - 1);
         }
 
         RectTransform Stretch(string name)
@@ -158,6 +227,19 @@ namespace WaterTurn
 
         void BuildWorld()
         {
+            floorBoxes.Clear();
+            entrancePlatformBoxes.Clear();
+            spikeBoxes.Clear();
+            valves.Clear();
+            foreach (var f in JellyRunData.Floors) floorBoxes.Add(f);
+            foreach (var p in JellyRunData.EntrancePlatforms) entrancePlatformBoxes.Add(p);
+            foreach (var s in JellyRunData.Spikes) spikeBoxes.Add(s);
+            portalBox = JellyRunData.Portal;
+            portalCenter = new Vector2(JellyRunData.Portal.x + JellyRunData.Portal.w * .5f,
+                JellyRunData.Portal.y + JellyRunData.Portal.h * .5f);
+            switchPosition = JellyRunData.Switch.position;
+            switchRadius = JellyRunData.Switch.radius;
+
             var voidGlow = WorldImage("VoidGlow", JellyRunArt.BottomGlow, Color.white,
                 JellyRunData.WorldW * .5f, 860f, JellyRunData.WorldW + 120f, 96f);
             voidGlow.type = Image.Type.Simple;
@@ -197,6 +279,17 @@ namespace WaterTurn
             BuildEntrances();
             BuildPortal();
             BuildSaws();
+            if (jellies.Count > 0)
+            {
+                spawnJelly = 0;
+                spawnPoint = new Vector2(jellies[0].x + 52f, jellies[0].y + 62f);
+                for (int i = 0; i < jellies.Count; i++)
+                {
+                    if (jellies[i].spec.floodTo < 0f) continue;
+                    wellValveTarget = jellies[i];
+                    break;
+                }
+            }
             BuildFish();
             BuildPools();
         }
@@ -345,6 +438,7 @@ namespace WaterTurn
                 view.pearl = WorldImage("Entrance Pearl " + i, JellyRunArt.Pearl, Color.white,
                     spec.entryX, spec.top - 72f, 32f, 32f);
                 view.pearl.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 45f);
+                view.pearlBase = view.pearl.rectTransform.anchoredPosition;
 
                 for (int p = 0; p < 4; p++)
                 {
@@ -630,7 +724,9 @@ namespace WaterTurn
         void UpdateWellValve()
         {
             if (wellValveRing == null) return;
-            bool flooded = jellies.Count > 9 && jellies[9].flooded;
+            bool flooded = wellValveTarget != null
+                ? wellValveTarget.flooded
+                : jellies.Count > 9 && jellies[9].flooded;
             float pulse = .5f + .5f * Mathf.Sin(time * 2.2f);
             wellValveGlow.color = flooded
                 ? new Color(1f, .78f, .42f, .42f)
@@ -667,7 +763,7 @@ namespace WaterTurn
                 e.beam.color = new Color(accent.r, accent.g, accent.b, complete ? .55f : .30f + pulse * .08f);
                 e.ring.color = new Color(accent.r, accent.g, accent.b, complete ? 1f : .72f);
                 e.ring.rectTransform.localRotation = Quaternion.Euler(0f, 0f, time * (complete ? 26f : 12f));
-                e.pearl.rectTransform.anchoredPosition = new Vector2(e.spec.entryX, -(e.spec.top - 72f + Mathf.Sin(time * 2f + i) * 4f));
+                e.pearl.rectTransform.anchoredPosition = e.pearlBase + new Vector2(0f, Mathf.Sin(time * 2f + i) * 4f);
                 e.pearl.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 45f + Mathf.Sin(time * 1.4f + i) * 8f);
                 e.title.color = new Color(accent.r, accent.g, accent.b, complete ? 1f : .85f);
             }

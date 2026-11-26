@@ -76,6 +76,26 @@ namespace WaterTurn
         readonly List<Floater> floaters = new List<Floater>();
         JellyRunAudio sfx;
 
+        readonly List<JellyRunData.RectF> floorBoxes = new List<JellyRunData.RectF>();
+        readonly List<JellyRunData.RectF> entrancePlatformBoxes = new List<JellyRunData.RectF>();
+        readonly List<JellyRunData.SpikeF> spikeBoxes = new List<JellyRunData.SpikeF>();
+        readonly List<ValveBinding> valves = new List<ValveBinding>();
+        JellyRunData.RectF portalBox;
+        Vector2 portalCenter;
+        Vector2 spawnPoint;
+        int spawnJelly;
+        JellyView wellValveTarget;
+        Vector2 switchPosition;
+        float switchRadius = 38f;
+
+        sealed class ValveBinding
+        {
+            public JellyView target;
+            public Vector2 position;
+            public float radius;
+            public JellyRunValveView view;
+        }
+
         RawImage caveFar, caveNear, stalFar, stalNear;
         readonly List<Image> shafts = new List<Image>();
         readonly List<Image> motes = new List<Image>();
@@ -137,6 +157,7 @@ namespace WaterTurn
             public readonly Image[] pips = new Image[4];
             public Text title, range;
             public float pulse;
+            public Vector2 pearlBase;
         }
 
         sealed class PortalView
@@ -280,7 +301,7 @@ namespace WaterTurn
             if (interactQueued)
             {
                 interactQueued = false;
-                if (nearestEntrance >= 0) EnterChapter(nearestEntrance);
+                if (nearestEntrance >= 0) EnterChapter(entrances[nearestEntrance].spec.chapter);
                 else ShowToast("走到潮心石台上再按 E");
             }
             CheckPortal();
@@ -415,9 +436,9 @@ namespace WaterTurn
                 return;
             }
 
-            for (int i = 0; i < JellyRunData.Spikes.Length; i++)
+            for (int i = 0; i < spikeBoxes.Count; i++)
             {
-                var s = JellyRunData.Spikes[i];
+                var s = spikeBoxes[i];
                 var box = new JellyRunData.RectF(s.x + 3f, s.y + (s.up ? 8f : 3f), s.w - 6f, s.h - 8f);
                 if (Overlap(FishBox(), box)) { Die(s.up ? "踩到尖刺了" : "撞上天花板的尖刺了"); return; }
             }
@@ -444,9 +465,9 @@ namespace WaterTurn
         bool OnEntranceLedge()
         {
             if (!onGround) return false;
-            for (int i = 0; i < JellyRunData.Entrances.Length; i++)
+            for (int i = 0; i < entrances.Count; i++)
             {
-                var e = JellyRunData.Entrances[i];
+                var e = entrances[i].spec;
                 if (fishPos.x >= e.platformX - 4f && fishPos.x <= e.platformX + e.platformW + 4f &&
                     Mathf.Abs(fishPos.y - (e.top - R)) < 26f)
                     return true;
@@ -458,18 +479,18 @@ namespace WaterTurn
         {
             fishPos.x += fishVel.x * dt;
             var box = FishBox();
-            for (int i = 0; i < JellyRunData.Floors.Length; i++)
+            for (int i = 0; i < floorBoxes.Count; i++)
             {
-                var s = JellyRunData.Floors[i];
+                var s = floorBoxes[i];
                 if (!Overlap(box, s)) continue;
                 if (fishVel.x > 0f) fishPos.x = s.x - R - .01f;
                 else if (fishVel.x < 0f) fishPos.x = s.Right + R + .01f;
                 fishVel.x = 0f;
                 box = FishBox();
             }
-            for (int i = 0; i < JellyRunData.EntrancePlatforms.Length; i++)
+            for (int i = 0; i < entrancePlatformBoxes.Count; i++)
             {
-                var s = JellyRunData.EntrancePlatforms[i];
+                var s = entrancePlatformBoxes[i];
                 if (!Overlap(box, s)) continue;
                 if (fishVel.x > 0f) fishPos.x = s.x - R - .01f;
                 else if (fishVel.x < 0f) fishPos.x = s.Right + R + .01f;
@@ -493,18 +514,18 @@ namespace WaterTurn
             bool wasDown = fishVel.y > 0f;
             float impactSpeed = fishVel.y;
             onGround = false;
-            for (int i = 0; i < JellyRunData.Floors.Length; i++)
+            for (int i = 0; i < floorBoxes.Count; i++)
             {
-                var s = JellyRunData.Floors[i];
+                var s = floorBoxes[i];
                 if (!Overlap(box, s)) continue;
                 if (fishVel.y > 0f) { fishPos.y = s.y - R - .01f; onGround = true; }
                 else if (fishVel.y < 0f) fishPos.y = s.Bottom + R + .01f;
                 fishVel.y = 0f;
                 box = FishBox();
             }
-            for (int i = 0; i < JellyRunData.EntrancePlatforms.Length; i++)
+            for (int i = 0; i < entrancePlatformBoxes.Count; i++)
             {
-                var s = JellyRunData.EntrancePlatforms[i];
+                var s = entrancePlatformBoxes[i];
                 if (!Overlap(box, s)) continue;
                 if (fishVel.y > 0f) { fishPos.y = s.y - R - .01f; onGround = true; }
                 else if (fishVel.y < 0f) fishPos.y = s.Bottom + R + .01f;
@@ -550,7 +571,7 @@ namespace WaterTurn
             checkpointJelly = index;
             checkpoint = new Vector2(j.x + j.w * .5f, j.y + Mathf.Min(j.h * .5f, 55f));
             moisture = Mathf.Min(100f, moisture + 45f);
-            if (index == 9 && !j.flooded && !wellHintShown)
+            if (j.spec.floodTo >= 0f && !j.flooded && !wellHintShown)
             {
                 wellHintShown = true;
                 ShowToast("井底有个阀门 · 潜到最深处碰它，潮水会把你托上去");
@@ -633,9 +654,9 @@ namespace WaterTurn
             if (!onGround || inJelly) return -1;
             int best = -1;
             float bestD = float.MaxValue;
-            for (int i = 0; i < JellyRunData.Entrances.Length; i++)
+            for (int i = 0; i < entrances.Count; i++)
             {
-                var e = JellyRunData.Entrances[i];
+                var e = entrances[i].spec;
                 if (fishPos.x < e.platformX - 10f || fishPos.x > e.platformX + e.platformW + 10f) continue;
                 if (Mathf.Abs(fishPos.y - (e.top - R)) > 40f) continue;
                 float d = Mathf.Abs(fishPos.x - e.entryX);
@@ -659,7 +680,7 @@ namespace WaterTurn
 
         void CheckPortal()
         {
-            if (!Overlap(FishBox(), JellyRunData.Portal)) return;
+            if (!Overlap(FishBox(), portalBox)) return;
             if (clearedMask == 0xFFFFF)
             {
                 WinRun();
@@ -680,8 +701,7 @@ namespace WaterTurn
             phase = Phase.Win;
             flash = .6f;
             sfx.Play("win");
-            Burst(JellyRunData.Portal.x + JellyRunData.Portal.w * .5f,
-                JellyRunData.Portal.y + JellyRunData.Portal.h * .5f, 40,
+            Burst(portalCenter.x, portalCenter.y, 40,
                 new Color(1f, 220 / 255f, 140 / 255f, 1f));
             ShowWinOverlay();
         }
@@ -746,7 +766,7 @@ namespace WaterTurn
                 }
             }
 
-            if (door.open < 1f)
+            if (door != null && door.open < 1f)
             {
                 bool shouldOpen = switchView != null && switchView.on;
                 if (shouldOpen) door.open = Mathf.Min(1f, door.open + dt * 2.4f);
@@ -765,15 +785,24 @@ namespace WaterTurn
             }
 
             if (switchView != null && !switchView.on &&
-                Vector2.Distance(fishPos, JellyRunData.Switch.position) < JellyRunData.Switch.radius + 16f)
+                Vector2.Distance(fishPos, switchPosition) < switchRadius + 16f)
             {
                 switchView.on = true;
                 switchView.pulse = 1f;
-                Burst(JellyRunData.Switch.position.x, JellyRunData.Switch.position.y, 22,
+                Burst(switchPosition.x, switchPosition.y, 22,
                     new Color(1f, 215 / 255f, 130 / 255f, 1f));
                 shake = Mathf.Max(shake, 6f);
                 sfx.Play("switch");
                 ShowToast("机关启动 · 闸门打开了");
+            }
+
+            for (int i = 0; i < valves.Count; i++)
+            {
+                var valve = valves[i];
+                if (valve.target == null || valve.target.flooded) continue;
+                if (Mathf.Abs(fishPos.x - valve.position.x) < valve.radius &&
+                    Mathf.Abs(fishPos.y - valve.position.y) < valve.radius)
+                    StartFlood(valve.target);
             }
 
             nearestEntrance = FindNearEntrance();
@@ -848,11 +877,21 @@ namespace WaterTurn
 
         void ResetFishToStart()
         {
-            var j = jellies[0];
-            inJelly = true;
-            jellyIndex = 0;
+            if (jellies.Count == 0)
+            {
+                fishPos = spawnPoint;
+                inJelly = false;
+                jellyIndex = -1;
+            }
+            else
+            {
+                spawnJelly = Mathf.Clamp(spawnJelly, 0, jellies.Count - 1);
+                var j = jellies[spawnJelly];
+                fishPos = spawnPoint;
+                inJelly = j.Box.Contains(spawnPoint.x, spawnPoint.y, 6f);
+                jellyIndex = inJelly ? spawnJelly : -1;
+            }
             ignoreJelly = -1;
-            fishPos = new Vector2(j.x + 52f, j.y + 62f);
             fishVel = Vector2.zero;
             onGround = false;
             usedDouble = false;
@@ -860,8 +899,8 @@ namespace WaterTurn
             charge = 0f;
             deaths = 0;
             elapsed = 0f;
-            checkpointJelly = 0;
-            checkpoint = new Vector2(fishPos.x, fishPos.y);
+            checkpointJelly = Mathf.Clamp(spawnJelly, 0, Mathf.Max(0, jellies.Count - 1));
+            checkpoint = spawnPoint;
             facing = FishFacing.Right;
             nearestEntrance = -1;
             entering = false;
@@ -872,7 +911,10 @@ namespace WaterTurn
 
         void SpawnAtEntrance(int entrance)
         {
-            var e = JellyRunData.Entrances[entrance];
+            JellyRunData.Entrance e = null;
+            for (int i = 0; i < entrances.Count; i++)
+                if (entrances[i].spec.chapter == entrance) { e = entrances[i].spec; break; }
+            if (e == null) e = JellyRunData.Entrances[entrance];
             inJelly = false;
             jellyIndex = -1;
             ignoreJelly = -1;
@@ -941,8 +983,9 @@ namespace WaterTurn
         public void DebugSetCharge(float value) { charge = Mathf.Clamp01(value); }
         public void DebugPlaceOnEntrance(int index)
         {
-            if (index < 0 || index >= JellyRunData.Entrances.Length) return;
-            var e = JellyRunData.Entrances[index];
+            if (entrances.Count == 0) return;
+            if (index < 0 || index >= entrances.Count) return;
+            var e = entrances[index].spec;
             DebugGoto(e.entryX, e.top - R);
         }
         public void DebugSetGod(bool value) { god = value; }

@@ -1,27 +1,42 @@
+using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using WaterTurn;
 
 namespace WaterTurn.EditorTools
 {
     /// <summary>
-    /// Builds the standalone "果冻潮池" scene and registers it in Build Settings.
-    /// The scene itself is deliberately tiny: the camera plus one JellyRunGame,
-    /// because the whole cave, its five chapter entrances and the HUD are
-    /// generated at runtime exactly like the HTML canvas prototype.
+    /// Scene-level helpers for the authored JellyRun scene.  The heavy lifting
+    /// now lives in <see cref="JellyRunSceneBaker"/>: the scene contains real
+    /// prefab instances, so "rebuild" means re-baking from the HTML tables.
     /// </summary>
     public static class JellyRunSceneTools
     {
         public const string ScenePath = "Assets/Scenes/JellyRun.unity";
         const string Menu = "WaterTurn/JellyRun/";
 
-        [MenuItem(Menu + "重建场景", false, 10)]
+        [MenuItem(Menu + "重建场景（覆盖手动修改）", false, 10)]
         public static void BuildAndSave()
         {
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            if (EditorApplication.isPlaying)
+            {
+                EditorUtility.DisplayDialog("果冻潮池", "请先退出 Play 模式。", "好");
+                return;
+            }
+            if (!EditorUtility.DisplayDialog("果冻潮池",
+                    "会用 JellyRunData 重新烘焙预制体和场景，覆盖场景里的手动修改。\n确定继续？",
+                    "重建", "取消"))
+                return;
 
+            if (!File.Exists(ScenePath)) CreateBareScene();
+            JellyRunSceneBaker.BakeSilent();
+            AddToBuildSettings();
+        }
+
+        static void CreateBareScene()
+        {
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var cameraGo = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
             cameraGo.tag = "MainCamera";
             var camera = cameraGo.GetComponent<Camera>();
@@ -29,25 +44,21 @@ namespace WaterTurn.EditorTools
             camera.backgroundColor = new Color(.027f, .078f, .114f, 1f);
             camera.orthographic = true;
             camera.cullingMask = 0;
-
             var root = new GameObject("JellyRun");
             root.AddComponent<JellyRunGame>();
-
-            System.IO.Directory.CreateDirectory("Assets/Scenes");
+            Directory.CreateDirectory("Assets/Scenes");
             EditorSceneManager.SaveScene(scene, ScenePath);
-            AddToBuildSettings();
-            AssetDatabase.Refresh();
-            EditorSceneManager.OpenScene(ScenePath);
-            Debug.Log("WaterTurn: 已重建 " + ScenePath + " 并写入 Build Settings。");
         }
 
-        [MenuItem(Menu + "校验入口布局", false, 11)]
+        [MenuItem(Menu + "校验入口布局与场景", false, 11)]
         public static void ValidateLayout()
         {
-            bool ok = JellyRunData.Validate(out string report);
+            bool ok = JellyRunData.Validate(out string dataReport);
+            string sceneReport = JellyRunSceneBaker.ValidateScene();
+            string report = (ok ? "入口布局 OK\n" : "入口布局失败\n") + dataReport + "\n\n" + sceneReport;
             if (ok) Debug.Log("[JellyRun] " + report);
-            else Debug.LogError("[JellyRun] 入口布局校验失败：\n" + report);
-            EditorUtility.DisplayDialog("果冻潮池 · 入口校验", report, "好");
+            else Debug.LogError("[JellyRun] " + report);
+            EditorUtility.DisplayDialog("果冻潮池 · 校验", report, "好");
         }
 
         [MenuItem(Menu + "清空入口进度", false, 12)]
@@ -61,11 +72,11 @@ namespace WaterTurn.EditorTools
         [MenuItem(Menu + "打开场景", false, 13)]
         public static void OpenScene()
         {
-            if (System.IO.File.Exists(ScenePath)) EditorSceneManager.OpenScene(ScenePath);
+            if (File.Exists(ScenePath)) EditorSceneManager.OpenScene(ScenePath);
             else BuildAndSave();
         }
 
-        static void AddToBuildSettings()
+        public static void AddToBuildSettings()
         {
             var scenes = new System.Collections.Generic.List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
             scenes.RemoveAll(s => s.path == ScenePath);
