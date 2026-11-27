@@ -5,6 +5,46 @@ using UnityEngine.UI;
 
 namespace WaterTurn.Forge
 {
+    public static class ForgeTerrain
+    {
+        public static readonly Color FloorTint = new Color(.85f, .81f, .74f);
+        static Dictionary<string, Sprite> atlas;
+
+        public static Sprite WallPreview => Tile("T0_13");
+        public static Sprite Floor => Tile("T16_14");
+        public static Sprite Crate => Tile("T21_19");
+
+        static Sprite Tile(string name)
+        {
+            if (atlas == null)
+            {
+                atlas = new Dictionary<string, Sprite>();
+                foreach (var sprite in Resources.LoadAll<Sprite>(DungeonSkinPreview.AtlasPath))
+                    atlas[sprite.name] = sprite;
+            }
+            return atlas.TryGetValue(name, out var result) ? result : null;
+        }
+
+        public static Sprite Wall(string[] board, int x, int y)
+        {
+            if (y == board.Length - 1 || OpenAt(board, x, y + 1)) return Tile("T2_3");
+            bool left = OpenAt(board, x - 1, y);
+            bool right = OpenAt(board, x + 1, y);
+            bool downRight = OpenAt(board, x + 1, y + 1);
+            if (left && right) return Tile("T0_1");
+            if (left && downRight) return Tile("T6_13");
+            if (left) return Tile("T2_13");
+            if (right) return Tile("T4_13");
+            if (downRight) return Tile("T1_1");
+            if (OpenAt(board, x - 1, y + 1)) return Tile("T3_1");
+            return WallPreview;
+        }
+
+        static bool OpenAt(string[] board, int x, int y) =>
+            y >= 0 && y < board.Length && board[y] != null &&
+            x >= 0 && x < board[y].Length && board[y][x] != '#';
+    }
+
     /// <summary>
     /// 盘面渲染器：把 rows（ASCII 盘面）画成一格一格的 UGUI 方块。
     /// 手动编辑区用它接点击，预览区用它只读显示（试玩时喂的是实时 Position）。
@@ -16,10 +56,13 @@ namespace WaterTurn.Forge
         RectTransform body;
         Image backing;
         readonly List<Image> cells = new List<Image>();
+        readonly List<Image> props = new List<Image>();
+        readonly List<Image> portals = new List<Image>();
         readonly List<Text> glyphs = new List<Text>();
         int columns, rows;
-        float cell, gap = 2f, areaWidth, areaHeight;
+        float areaWidth, areaHeight;
         bool interactive;
+        static Sprite water, fish;
 
         public int Columns => columns;
         public int Rows => rows;
@@ -47,6 +90,7 @@ namespace WaterTurn.Forge
 
             if (body == null || columns != width || rows != data.Length) Build(width, data.Length);
             if (backing != null) backing.color = palette.bg;
+            portals.Clear();
 
             for (int y = 0; y < rows; y++)
             {
@@ -56,11 +100,41 @@ namespace WaterTurn.Forge
                     char tile = row != null && x < row.Length ? row[x] : '#';
                     var style = ForgeTiles.Style(tile, palette);
                     int index = y * columns + x;
-                    cells[index].color = style.bg;
+                    var ground = cells[index];
+                    ground.sprite = tile == '#' ? ForgeTerrain.Wall(data, x, y) :
+                        tile == '~' || tile == 'b' ? BrushSprite('~') : ForgeTerrain.Floor;
+                    ground.color = ground.sprite == null ? style.bg :
+                        tile == '#' || tile == '~' || tile == 'b' ? Color.white : ForgeTerrain.FloorTint;
+
+                    var prop = props[index];
+                    prop.sprite = tile == 'P' || tile == 'B' || tile == 'b' || tile == '1' || tile == '2'
+                        ? BrushSprite(tile) : null;
                     var glyph = glyphs[index];
-                    glyph.text = style.glyph;
+                    glyph.text = prop.sprite == null ? style.glyph : "";
                     glyph.color = style.fg;
+                    prop.enabled = prop.sprite != null || glyph.text.Length > 0;
+                    prop.color = prop.sprite != null ? Color.white : style.bg;
+                    if (tile == '1' || tile == '2') portals.Add(prop);
                 }
+            }
+            WaterGame.AnimatePortals(portals);
+        }
+
+        void Update() => WaterGame.AnimatePortals(portals);
+
+        public static Sprite BrushSprite(char tile)
+        {
+            switch (tile)
+            {
+                case '#': return ForgeTerrain.WallPreview;
+                case '.': return ForgeTerrain.Floor;
+                case '~': return water != null ? water : (water = Resources.Load<Sprite>("Art/Water/water_0"));
+                case 'P': return fish != null ? fish : (fish = Resources.Load<Sprite>("Art/Fish/swim_right_0"));
+                case '1':
+                case '2': return WaterGame.PortalSprite;
+                case 'B':
+                case 'b': return ForgeTerrain.Crate;
+                default: return null;
             }
         }
 
@@ -120,6 +194,8 @@ namespace WaterTurn.Forge
                 body = null;
             }
             cells.Clear();
+            props.Clear();
+            portals.Clear();
             glyphs.Clear();
             columns = rows = 0;
         }
@@ -129,26 +205,30 @@ namespace WaterTurn.Forge
             Clear();
             columns = width;
             rows = height;
-            cell = Mathf.Max(10f, Mathf.Floor(Mathf.Min(areaWidth / width, areaHeight / height)));
+            float cell = Mathf.Max(1f, Mathf.Floor(Mathf.Min(areaWidth / width, areaHeight / height)));
             float totalWidth = cell * width, totalHeight = cell * height;
 
             body = ForgeUi.Node(transform, "Cells");
             ForgeUi.Place(body, (areaWidth - totalWidth) * 0.5f, (areaHeight - totalHeight) * 0.5f, totalWidth, totalHeight);
             backing = ForgeUi.Box(body, "Backing", Color.black, 0, 0, totalWidth, totalHeight);
 
-            float size = Mathf.Max(1f, cell - gap);
-            int fontSize = Mathf.Clamp(Mathf.RoundToInt(size * 0.46f), 9, 24);
+            float inset = Mathf.Round(cell * .12f);
+            float propSize = cell - 2f * inset;
+            int fontSize = Mathf.Clamp(Mathf.RoundToInt(cell * .42f), 6, 24);
 
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    var rt = ForgeUi.Place(ForgeUi.Node(body, "Cell"), x * cell, y * cell, size, size);
+                    var rt = ForgeUi.Place(ForgeUi.Node(body, "Cell"), x * cell, y * cell, cell, cell);
                     var image = rt.gameObject.AddComponent<Image>();
                     image.color = Color.black;
                     image.raycastTarget = interactive;
                     cells.Add(image);
-                    glyphs.Add(ForgeUi.Label(rt, "", fontSize, Color.white, TextAnchor.MiddleCenter, 0, 0, size, size, false));
+                    var prop = ForgeUi.Box(rt, "Prop", Color.white, inset, inset, propSize, propSize);
+                    prop.preserveAspect = true;
+                    props.Add(prop);
+                    glyphs.Add(ForgeUi.Label(rt, "", fontSize, Color.white, TextAnchor.MiddleCenter, 0, 0, cell, cell, false));
 
                     if (!interactive) continue;
                     int cellX = x, cellY = y;

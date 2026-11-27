@@ -31,8 +31,8 @@ namespace WaterTurn.Forge
 
         static readonly string[] PaletteCaptions =
         {
-            "地", "水", "鱼", "出", "墙", "箱", "压", "1", "2", "→",
-            "↑", "↓", "←", "感", "时", "闸", "珠", "膜", "泉", "栅"
+            "地板", "水", "玩家", "出口", "墙砖", "木箱", "重压格", "传送门甲", "传送门乙", "右向阀",
+            "上向阀", "下向阀", "左向阀", "感应格", "时效格", "石门", "珍珠", "薄膜", "泉眼", "栅栏"
         };
 
         sealed class ThemeTarget
@@ -54,7 +54,7 @@ namespace WaterTurn.Forge
         // ---- 界面引用 ----
         RectTransform canvasRect;
         Image background, headerBar, leftPanel, middlePanel, rightPanel, bottomBar;
-        Text titleText, subtitleText, statusText;
+        Text statusText;
         Text themeValue, difficultyNote, countValue, moveLimitValue, widthValue, heightValue, brushLabel;
         readonly List<Button> difficultySegments = new List<Button>();
         readonly List<Button> hintSegments = new List<Button>();
@@ -93,7 +93,7 @@ namespace WaterTurn.Forge
             BuildUi();
             ApplyTheme();
             NewWorkspace(ForgeGenerator.Blank(7));
-            SetStatus("就绪：左侧调参数 → 生成关卡 → 中间手改 → 右侧试玩 → 底部保存/导出。");
+            SetStatus("请选择画笔绘制，或从左侧生成关卡。");
         }
 
         void Update()
@@ -144,13 +144,15 @@ namespace WaterTurn.Forge
             var scaler = canvasGo.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
-            canvasRect = (RectTransform)canvasGo.transform;
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
             EnsureEventSystem();
 
-            background = ForgeUi.Box(canvasRect, "Background", palette.bg, 0, 0, 0, 0);
+            background = ForgeUi.Box(canvasGo.transform, "Background", palette.bg, 0, 0, 0, 0);
             ForgeUi.Fill(background.rectTransform);
+            Tint(background, RoleBg);
+            canvasRect = ForgeUi.Node(canvasGo.transform, "Workspace");
+            canvasRect.anchorMin = canvasRect.anchorMax = canvasRect.pivot = new Vector2(.5f, .5f);
+            canvasRect.sizeDelta = scaler.referenceResolution;
 
             BuildHeader();
             BuildLeftPanel();
@@ -175,15 +177,13 @@ namespace WaterTurn.Forge
         {
             headerBar = ForgeUi.Box(canvasRect, "Header", palette.panel, 0, 0, 1920, 84);
             Tint(headerBar, RolePanel);
-            titleText = ForgeUi.Label(headerBar.rectTransform, "谜题工坊 · PuzzleForge", 26, palette.text,
-                TextAnchor.UpperLeft, 28, 12, 700, 34, false);
+            var titleText = ForgeUi.Label(headerBar.rectTransform, "谜题工坊", 30, palette.text,
+                TextAnchor.MiddleLeft, 28, 0, 600, 82, false);
+            titleText.fontStyle = FontStyle.Bold;
             Tint(titleText, RoleText);
-            subtitleText = ForgeUi.Label(headerBar.rectTransform,
-                "参数配置 → 生成 → 手动编辑 → 预览试玩 → 保存/导出；盘面就是 WaterTurn.Level 的 ASCII 定义", 13,
-                palette.dim, TextAnchor.UpperLeft, 28, 48, 1000, 22, false);
-            Tint(subtitleText, RoleDim);
-            statusText = ForgeUi.Label(headerBar.rectTransform, "", 14, palette.accent, TextAnchor.UpperRight,
-                1000, 26, 892, 30, false);
+            Tint(ForgeUi.Box(headerBar.rectTransform, "Divider", palette.line, 0, 82, 1920, 2), RoleLine);
+            statusText = ForgeUi.Label(headerBar.rectTransform, "", 16, palette.accent, TextAnchor.MiddleRight,
+                640, 8, 1252, 66);
             Tint(statusText, RoleAccent);
         }
 
@@ -193,7 +193,7 @@ namespace WaterTurn.Forge
             Tint(leftPanel, RolePanel);
             var root = leftPanel.rectTransform;
 
-            var heading = ForgeUi.Label(root, "① 谜题参数配置", 17, palette.accent, TextAnchor.UpperLeft, 20, 14, 360, 26, false);
+            var heading = ForgeUi.Label(root, "生成设置", 21, palette.accent, TextAnchor.UpperLeft, 20, 14, 360, 30, false);
             Tint(heading, RoleAccent);
 
             // 主题
@@ -332,10 +332,10 @@ namespace WaterTurn.Forge
             Tint(middlePanel, RolePanel);
             var root = middlePanel.rectTransform;
 
-            var heading = ForgeUi.Label(root, "② 手动编辑区", 17, palette.accent, TextAnchor.UpperLeft, 20, 14, 300, 26, false);
+            var heading = ForgeUi.Label(root, "关卡画布", 21, palette.accent, TextAnchor.UpperLeft, 20, 14, 300, 30, false);
             Tint(heading, RoleAccent);
-            var note = ForgeUi.Label(root, "点色板选格子，再点棋盘涂改；每次改动都会重新求解校验。", 11, palette.dim,
-                TextAnchor.UpperLeft, 20, 42, 520, 18, false);
+            var note = ForgeUi.Label(root, "选择画笔，再点击盘面铺设。", 14, palette.dim,
+                TextAnchor.UpperLeft, 20, 42, 520, 20, false);
             Tint(note, RoleDim);
 
             // 尺寸
@@ -368,19 +368,26 @@ namespace WaterTurn.Forge
             Tint(brushLabel, RoleAccent);
             for (int i = 0; i < ForgeTiles.Palette.Length; i++)
             {
-                int index = i;
                 char tile = ForgeTiles.Palette[i];
-                var button = ForgeUi.Button(root, PaletteCaptions[i], 13, palette.panelAlt, palette.text,
-                    20 + (i % 8) * 64, 120 + (i / 8) * 32, 60, 28, () => SetBrush(tile));
-                Tint(button.targetGraphic, RolePanelAlt);
+                var button = ForgeUi.Button(root, PaletteCaptions[i], 14, palette.panelAlt, palette.text,
+                    20 + (i % 5) * 105, 124 + (i / 5) * 36, 100, 32, () => SetBrush(tile));
+                ForgeUi.Place(ForgeUi.TextOf(button).rectTransform, 30, 0, 68, 32);
+                var style = ForgeTiles.Style(tile, palette);
+                var icon = ForgeUi.Box(button.transform, "Preview", style.bg, 6, 6, 20, 20);
+                icon.sprite = ForgeBoard.BrushSprite(tile);
+                icon.preserveAspect = true;
+                if (icon.sprite != null)
+                    icon.color = tile == '.' ? ForgeTerrain.FloorTint : Color.white;
+                else if (style.glyph.Length > 0)
+                    ForgeUi.Label(icon.transform, style.glyph, 12, style.fg, TextAnchor.MiddleCenter,
+                        0, 0, 20, 20, false);
                 paletteButtons.Add(button);
-                if (tile == brush) SetBrush(tile);
             }
+            SetBrush(brush);
 
             // 棋盘
-            var boardCaption = ForgeUi.Label(root, "关卡棋盘", 12, palette.dim, TextAnchor.UpperLeft, 20, 226, 300, 18, false);
-            Tint(boardCaption, RoleDim);
-            painter = ForgeBoard.Create(root, "Painter", 20, 246, 520, 428, true, PaintCell);
+            Tint(ForgeUi.Box(root, "BoardWell", palette.bg, 20, 276, 520, 394), RoleBg);
+            painter = ForgeBoard.Create(root, "Painter", 28, 284, 504, 378, true, PaintCell);
 
             // ASCII
             var asciiCaption = ForgeUi.Label(root, "ASCII 盘面（可整体粘贴/替换后点应用）", 11, palette.dim,
@@ -399,16 +406,14 @@ namespace WaterTurn.Forge
             Tint(rightPanel, RolePanel);
             var root = rightPanel.rectTransform;
 
-            var heading = ForgeUi.Label(root, "③ 关卡预览与校验", 17, palette.accent, TextAnchor.UpperLeft, 20, 14, 400, 26, false);
+            var heading = ForgeUi.Label(root, "预览与试玩", 21, palette.accent, TextAnchor.UpperLeft, 20, 14, 400, 30, false);
             Tint(heading, RoleAccent);
-            var note = ForgeUi.Label(root, "选中关卡看盘面与答案，也可以直接试玩验证。", 11, palette.dim,
-                TextAnchor.UpperLeft, 20, 42, 500, 18, false);
-            Tint(note, RoleDim);
 
             tabsRow = ForgeUi.Node(root, "Tabs");
             ForgeUi.Place(tabsRow, 20, 66, 840, 32);
 
-            preview = ForgeBoard.Create(root, "Preview", 20, 108, 520, 520, false, null);
+            Tint(ForgeUi.Box(root, "PreviewWell", palette.bg, 20, 108, 520, 520), RoleBg);
+            preview = ForgeBoard.Create(root, "Preview", 28, 116, 504, 504, false, null);
 
             previewTitle = ForgeUi.Label(root, "未生成", 16, palette.text, TextAnchor.UpperLeft, 556, 110, 304, 26, false);
             Tint(previewTitle, RoleText);
@@ -461,10 +466,6 @@ namespace WaterTurn.Forge
             moveButtons.Add(ForgeUi.Button(root, "结束试玩", 12, palette.panelAlt, palette.text, 600, 662, 96, 34, ExitTrial));
             foreach (var button in moveButtons) Tint(button.targetGraphic, RolePanelAlt);
 
-            var legend = ForgeUi.Label(root,
-                "图例：墙 #    地面 .    水 ~    鱼 P    出口 E    箱子 B    重压 X    门 1/2    阀 ↑→↓←    感应 S/s    闸 D    珠 K    膜 M    泉 o    栅 G",
-                10, palette.dim, TextAnchor.UpperLeft, 20, 712, 840, 40);
-            Tint(legend, RoleDim);
         }
 
         void BuildBottomBar()
@@ -473,19 +474,18 @@ namespace WaterTurn.Forge
             Tint(bottomBar, RolePanel);
             var root = bottomBar.rectTransform;
 
-            var gen = ForgeUi.Button(root, "生成关卡", 14, palette.accent, palette.bg, 0, 8, 196, 40, Generate);
-            validateButton = ForgeUi.Button(root, "校验当前关", 14, palette.panelAlt, palette.text, 208, 8, 196, 40, ValidateAndReport);
-            trialButton = ForgeUi.Button(root, "试玩", 14, palette.panelAlt, palette.text, 416, 8, 196, 40, StartTrial);
-            replayButton = ForgeUi.Button(root, "回放答案", 14, palette.panelAlt, palette.text, 624, 8, 196, 40, ReplaySolution);
-            saveButton = ForgeUi.Button(root, "保存工程", 14, palette.panelAlt, palette.text, 832, 8, 196, 40, SavePack);
-            exportButton = ForgeUi.Button(root, "导出关卡", 14, palette.panelAlt, palette.text, 1040, 8, 196, 40, ExportPack);
-            var sceneButton = ForgeUi.Button(root, "导出场景", 14, palette.panelAlt, palette.text, 1248, 8, 196, 40, ExportScenePack);
-            loadButton = ForgeUi.Button(root, "读取工程", 14, palette.panelAlt, palette.text, 1456, 8, 196, 40, LoadPack);
-            clearButton = ForgeUi.Button(root, "清空重来", 14, palette.panelAlt, palette.text, 1664, 8, 196, 40, ClearWorkspace);
+            validateButton = ForgeUi.Button(root, "校验当前关", 16, palette.panelAlt, palette.text, 12, 8, 164, 40, ValidateAndReport);
+            trialButton = ForgeUi.Button(root, "开始试玩", 16, palette.accent, palette.bg, 184, 8, 164, 40, StartTrial);
+            replayButton = ForgeUi.Button(root, "回放答案", 16, palette.panelAlt, palette.text, 356, 8, 164, 40, ReplaySolution);
+            clearButton = ForgeUi.Button(root, "清空盘面", 16, palette.panelAlt, palette.text, 532, 8, 156, 40, ClearWorkspace);
+            loadButton = ForgeUi.Button(root, "读取工程", 16, palette.panelAlt, palette.text, 1044, 8, 192, 40, LoadPack);
+            saveButton = ForgeUi.Button(root, "保存工程", 16, palette.panelAlt, palette.text, 1244, 8, 192, 40, SavePack);
+            exportButton = ForgeUi.Button(root, "导出关卡", 16, palette.panelAlt, palette.text, 1452, 8, 192, 40, ExportPack);
+            var sceneButton = ForgeUi.Button(root, "导出场景", 16, palette.panelAlt, palette.text, 1652, 8, 208, 40, ExportScenePack);
 
-            Tint(gen.targetGraphic, RoleAccent);
-            Tint(ForgeUi.TextOf(gen), RoleAccentText);
-            foreach (var button in new[] {validateButton, trialButton, replayButton, saveButton, exportButton, sceneButton, loadButton, clearButton})
+            Tint(trialButton.targetGraphic, RoleAccent);
+            Tint(ForgeUi.TextOf(trialButton), RoleAccentText);
+            foreach (var button in new[] {validateButton, replayButton, saveButton, exportButton, sceneButton, loadButton, clearButton})
                 Tint(button.targetGraphic, RolePanelAlt);
         }
 
@@ -546,7 +546,7 @@ namespace WaterTurn.Forge
             brush = tile;
             PaintPalette();
             var style = ForgeTiles.Style(tile, palette);
-            brushLabel.text = $"色板 · 当前画笔：{style.name}（{tile}）";
+            brushLabel.text = $"当前画笔  {style.name}（{tile}）";
         }
 
         void PaintPalette()

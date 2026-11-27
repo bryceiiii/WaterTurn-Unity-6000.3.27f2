@@ -227,10 +227,42 @@ namespace WaterTurn.Forge.EditorTools
                         int i = y * width + x;
                         char tile = rows[y][x];
                         bool wall = tile == '#';
-                        Add(board, wall ? tiles.wall : tiles.floor, wall ? "Wall " + i : "Floor " + i,
-                            Point(i, width, height, cell), wall ? cell + 1f : cell - 2f);
+                        var terrain = Add(board, wall ? tiles.wall : tiles.floor, wall ? "Wall " + i : "Floor " + i,
+                            Point(i, width, height, cell), wall ? cell + 1f : cell);
+                        var sprite = wall ? ForgeTerrain.Wall(rows, x, y) : ForgeTerrain.Floor;
+                        if (sprite == null)
+                            throw new InvalidOperationException("Puny Dungeon 地形图集缺少瓦片。");
+                        SetTerrainImage(terrain.GetComponent<Image>(), sprite, wall ? Color.white : ForgeTerrain.FloorTint);
+                        if (wall)
+                        {
+                            var rock = (RectTransform)terrain.Find("Rock");
+                            rock.anchoredPosition = Vector2.zero;
+                            rock.sizeDelta = Vector2.zero;
+                            PrefabUtility.RecordPrefabInstancePropertyModifications(rock);
+                            SetTerrainImage(rock.GetComponent<Image>(), sprite, Color.white);
+                        }
                     }
                 }
+
+                var portals = new List<Image>();
+                for (int i = 0; i < width * height; i++)
+                {
+                    char tile = rows[i / width][i % width];
+                    if (tile != '1' && tile != '2') continue;
+
+                    var sprite = WaterGame.PortalSprite;
+                    if (sprite == null)
+                        throw new InvalidOperationException("Puny Dungeon 图集缺少传送门瓦片。");
+                    Vector2 point = Point(i, width, height, cell);
+                    var portal = ForgeUi.Box(room, "Portal " + tile, Color.white, 0, 0, cell * .86f, cell * .86f);
+                    var rect = portal.rectTransform;
+                    rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(.5f, .5f);
+                    rect.anchoredPosition = point;
+                    portal.sprite = sprite;
+                    portal.preserveAspect = true;
+                    portals.Add(portal);
+                }
+                board.portals = portals.ToArray();
 
                 // 水：顺序必须和 Position.Water 一致（扫描序），鱼脚下那格、箱子格、泉眼都算水。
                 var waters = new List<RectTransform>();
@@ -283,6 +315,13 @@ namespace WaterTurn.Forge.EditorTools
             {
                 EditorSceneManager.CloseScene(scene, true);
             }
+        }
+
+        static void SetTerrainImage(Image image, Sprite sprite, Color tint)
+        {
+            image.sprite = sprite;
+            image.color = tint;
+            PrefabUtility.RecordPrefabInstancePropertyModifications(image);
         }
 
         /// <summary>和 WaterGame.Point 完全一致的格子坐标（Room 中心为原点）。</summary>

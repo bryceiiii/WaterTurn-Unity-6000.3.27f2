@@ -7,6 +7,17 @@ namespace WaterTurn
     public enum Move { Up, Right, Down, Left, Turn, TurnLeft }
     public enum Block { None, Dry, Crate, Grate, Arrow }
 
+    internal readonly struct PortalTransit
+    {
+        public readonly int Entrance, Exit;
+
+        public PortalTransit(int entrance, int exit)
+        {
+            Entrance = entrance;
+            Exit = exit;
+        }
+    }
+
     public sealed class Level
     {
         public readonly string Name, Hint;
@@ -149,13 +160,18 @@ namespace WaterTurn
         public static bool OnGate(Level level, Position p) =>
             p != null && level.Tiles[p.Fish] == 'D';
 
-        public static Position Apply(Level level, Position p, Move move, out Block block)
+        public static Position Apply(Level level, Position p, Move move, out Block block) =>
+            Apply(level, p, move, out block, null);
+
+        internal static Position Apply(Level level, Position p, Move move, out Block block,
+            List<PortalTransit>[] portalPaths)
         {
             block = Block.None;
             if (move == Move.Turn || move == Move.TurnLeft)
             {
                 int turn = (p.Turn + (move == Move.Turn ? 1 : 3)) % 4;
-                return Fall(level, new Position(p.Water, p.Rider, p.Boxes, turn, p.Gate, p.Pearl), out block);
+                return Fall(level, new Position(p.Water, p.Rider, p.Boxes, turn, p.Gate, p.Pearl),
+                    out block, portalPaths);
             }
 
             int direction = ((int)move - p.Turn + 4) % 4;
@@ -189,7 +205,8 @@ namespace WaterTurn
             var boxes = (int[])p.Boxes.Clone();
             boxes[Array.IndexOf(boxes, step)] = dest;
             Array.Sort(boxes);
-            return Fall(level, new Position(p.Water, rider, boxes, p.Turn, p.Gate, hasPearl), out block);
+            return Fall(level, new Position(p.Water, rider, boxes, p.Turn, p.Gate, hasPearl),
+                out block, portalPaths);
         }
 
         static bool CanPushInto(Level level, int cell, Position p)
@@ -343,7 +360,7 @@ namespace WaterTurn
             return arrow >= 0 && arrow != direction;
         }
 
-        static Position Fall(Level level, Position p, out Block block)
+        static Position Fall(Level level, Position p, out Block block, List<PortalTransit>[] portalPaths = null)
         {
             block = Block.None;
             int direction = (6 - p.Turn) % 4;
@@ -359,6 +376,8 @@ namespace WaterTurn
             for (int pass = 0; pass < 3; pass++)
             {
                 block = Block.None;
+                // Only animate the pass that produced the returned water positions.
+                if (portalPaths != null) Array.Clear(portalPaths, 0, portalPaths.Length);
                 water = (int[])p.Water.Clone();
                 int[] order = Enumerable.Range(0, water.Length)
                     .OrderByDescending(i => X[direction] * (water[i] % width) + Y[direction] * (water[i] / width))
@@ -384,6 +403,8 @@ namespace WaterTurn
                             if (p.HasBox(next) || p.HasBox(far)) break;
                             int outlet = Step(level, far, direction);
                             if (!Free(level, outlet, gate) || wet.Contains(outlet) || p.HasBox(outlet)) break;
+                            if (portalPaths != null)
+                                (portalPaths[i] ??= new List<PortalTransit>()).Add(new PortalTransit(next, far));
                             cell = outlet;
                             continue;
                         }

@@ -19,6 +19,54 @@ namespace WaterTurn
         static readonly Color Slate = new Color32(39, 59, 69, 255);
         static readonly Color Teal = new Color32(120, 239, 234, 255);
         static readonly Color Amber = new Color32(255, 193, 124, 255);
+        const float PortalFramesPerSecond = 8f;
+        const int PortalIdleFrameCount = 4;
+        const int PortalFlashFrameCount = 6;
+        static Sprite[] portalFrames;
+
+        public static Sprite PortalSprite
+        {
+            get
+            {
+                if (portalFrames == null)
+                {
+                    portalFrames = new Sprite[PortalIdleFrameCount + PortalFlashFrameCount];
+                    foreach (var sprite in Resources.LoadAll<Sprite>(DungeonSkinPreview.AtlasPath))
+                    {
+                        switch (sprite.name)
+                        {
+                            case "T16_9": portalFrames[0] = sprite; break;
+                            case "T17_9": portalFrames[1] = sprite; break;
+                            case "T18_9": portalFrames[2] = sprite; break;
+                            case "T19_9": portalFrames[3] = sprite; break;
+                            case "T20_9": portalFrames[4] = sprite; break;
+                            case "T21_9": portalFrames[5] = sprite; break;
+                            case "T22_9": portalFrames[6] = sprite; break;
+                            case "T23_9": portalFrames[7] = sprite; break;
+                            case "T24_9": portalFrames[8] = sprite; break;
+                            case "T25_9": portalFrames[9] = sprite; break;
+                        }
+                    }
+                }
+                return portalFrames[0];
+            }
+        }
+
+        internal static void AnimatePortals(List<Image> images)
+        {
+            if (images.Count == 0) return;
+            var sprite = PortalIdleFrame();
+            foreach (var image in images)
+                if (image != null && image.sprite != sprite)
+                    image.sprite = sprite;
+        }
+
+        static Sprite PortalIdleFrame()
+        {
+            var firstFrame = PortalSprite;
+            int frame = (int)(Time.unscaledTimeAsDouble * PortalFramesPerSecond % PortalIdleFrameCount);
+            return portalFrames[frame] ?? firstFrame;
+        }
 
         GameHud hud;
         LevelDefinition definition;
@@ -38,11 +86,14 @@ namespace WaterTurn
         readonly List<Button> levels = new List<Button>();
         readonly Stack<Position> history = new Stack<Position>();
         RectTransform[] waters, foams;
+        Vector3[] waterScales;
         Image[] waterImages, foamImages;
         RectTransform fish, geometry;
         RectTransform[] crates;
         Image gate, pearl, sensor;
         RectTransform mechanismLayer, valveLayer;
+        readonly Dictionary<int, Image> portalImages = new Dictionary<int, Image>();
+        readonly Dictionary<int, int> portalFlashes = new Dictionary<int, int>();
         readonly List<Image> plateImages = new List<Image>();
         readonly List<int> plateCells = new List<int>();
         readonly List<Image> latchImages = new List<Image>();
@@ -444,6 +495,7 @@ namespace WaterTurn
         {
             AnimateWater();
             AnimateFish();
+            PaintPortals();
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
             if (dying || leaving) return;
@@ -482,9 +534,11 @@ namespace WaterTurn
             foams = boardView.foam ?? new RectTransform[0];
             waterMasks = new int[waters.Length];
             waterImages = new Image[waters.Length];
+            waterScales = new Vector3[waters.Length];
             for (int i = 0; i < waters.Length; i++)
             {
                 waterImages[i] = waters[i].GetComponent<Image>();
+                waterScales[i] = waters[i].localScale;
                 if (waterImages[i] != null)
                     waterImages[i].color = new Color(0.88f, 0.98f, 0.99f, 0.94f);
             }
@@ -537,14 +591,14 @@ namespace WaterTurn
         }
 
         /// <summary>
-        /// 传送门和重压格先用白模：纯白门框 + 冷/暖内芯区分一对门，
-        /// 重压格是一块灰色凹槽，被箱子压住时转青。都是 Room 的子物体，
-        /// 所以跟着房间一起转，坐标和格子一一对应。
+        /// 机关都是 Room 的子物体，跟着房间旋转，与盘面格子对齐。
         /// </summary>
         void BuildMechanismViews()
         {
             if (mechanismLayer != null) Destroy(mechanismLayer.gameObject);
             if (valveLayer != null) Destroy(valveLayer.gameObject);
+            portalImages.Clear();
+            portalFlashes.Clear();
             plateImages.Clear();
             plateCells.Clear();
             latchImages.Clear();
@@ -553,6 +607,13 @@ namespace WaterTurn
             sensorCells.Clear();
             invertedGates.Clear();
             if (geometry == null || current == null) return;
+            int portalIndex = 0;
+            for (int p = 0; p < current.Portal.Length && portalIndex < boardView.portals.Length; p++)
+            {
+                if (current.Portal[p] < 0) continue;
+                var image = boardView.portals[portalIndex++];
+                if (image != null) portalImages.Add(p, image);
+            }
 
             var layer = new GameObject("Mechanisms", typeof(RectTransform));
             mechanismLayer = (RectTransform) layer.transform;
@@ -561,7 +622,7 @@ namespace WaterTurn
             mechanismLayer.pivot = new Vector2(.5f, .5f);
             mechanismLayer.anchoredPosition = Vector2.zero;
             mechanismLayer.sizeDelta = Vector2.zero;
-            // 白模要压在地板之上、水/箱子/鱼之下，否则箱子塞住门时会整个被门框盖住。
+            // 机关在水和箱子之下，让箱子压住机关时仍清楚可见。
             int firstWater = int.MaxValue;
             if (waters != null)
                 foreach (var body in waters)
@@ -586,20 +647,9 @@ namespace WaterTurn
             for (int p = 0; p < current.Tiles.Length; p++)
             {
                 char tile = current.Tiles[p];
-                if (tile == '1' || tile == '2')
+                if (tile == 'X')
                 {
-                    var tint = tile == '1'
-                        ? new Color32(198, 240, 255, 255)
-                        : new Color32(232, 196, 255, 255);
-                    var frame = Box("Portal " + tile, mechanismLayer, cell * .86f, cell * .86f,
-                        new Color32(246, 251, 255, 255));
-                    frame.anchoredPosition = Point(p);
-                    var mouth = Box("Mouth", frame, cell * .56f, cell * .56f, new Color32(18, 30, 40, 255));
-                    Box("Core", mouth, cell * .32f, cell * .32f, tint);
-                }
-                else if (tile == 'X')
-                {
-                    // 重压格：灰色凹槽，不能和白色的门框混淆。
+                    // 重压格用灰色凹槽和蓝色传送门区分。
                     var plate = Box("Plate " + p, mechanismLayer, cell * .80f, cell * .52f,
                         new Color32(134, 152, 166, 255));
                     plate.anchoredPosition = Point(p);
@@ -836,7 +886,8 @@ namespace WaterTurn
         void Play(Move move)
         {
             if (won || busy || dying || position == null) return;
-            Position result = Puzzle.Apply(current, position, move, out Block block);
+            var portalPaths = current.HasPortal ? new List<PortalTransit>[position.Water.Length] : null;
+            Position result = Puzzle.Apply(current, position, move, out Block block, portalPaths);
             if (result == null)
             {
                 // Grates are lethal too: the move that would drag the fish into the
@@ -863,10 +914,10 @@ namespace WaterTurn
             // Rotating is always allowed, even when the turn would carry the fish
             // into a gate. The gate is what kills; the turn is just how the fish
             // got there — Animate's gate check handles it once the room settles.
-            StartCoroutine(Animate(move, result));
+            StartCoroutine(Animate(move, result, portalPaths: portalPaths));
         }
 
-        IEnumerator Animate(Move move, Position result, bool fatal = false)
+        IEnumerator Animate(Move move, Position result, bool fatal = false, List<PortalTransit>[] portalPaths = null)
         {
             busy = true;
             Position source = position;
@@ -882,9 +933,14 @@ namespace WaterTurn
                 }
                 angle += direction * 90;
             }
-            for (float t = 0; t < .16f; t += Time.unscaledDeltaTime)
+            int mostTransits = 0;
+            if (portalPaths != null)
+                foreach (var path in portalPaths)
+                    if (path != null) mostTransits = Mathf.Max(mostTransits, path.Count);
+            float duration = mostTransits == 0 ? .16f : Mathf.Min(1.6f, .4f + mostTransits * .4f);
+            for (float t = 0; t < duration; t += Time.unscaledDeltaTime)
             {
-                Paint(source, result, angle, Mathf.SmoothStep(0, 1, t / .16f));
+                Paint(source, result, angle, t / duration, portalPaths);
                 yield return null;
             }
             history.Push(source);
@@ -934,18 +990,80 @@ namespace WaterTurn
             Refresh();
         }
 
-        void Paint(Position source, Position target, float angle, float fraction)
+        void RecordPortalFlash(int cell, float progress)
         {
+            int frame = Mathf.Clamp((int)(progress * PortalFlashFrameCount), 0, PortalFlashFrameCount - 1);
+            if (!portalFlashes.TryGetValue(cell, out int previous) || frame > previous)
+                portalFlashes[cell] = frame;
+        }
+
+        void PaintPortals()
+        {
+            if (portalImages.Count == 0) return;
+            var idle = PortalIdleFrame();
+            foreach (var portal in portalImages)
+            {
+                var sprite = portalFlashes.TryGetValue(portal.Key, out int frame)
+                    ? portalFrames[PortalIdleFrameCount + frame] ?? idle
+                    : idle;
+                if (portal.Value.sprite != sprite) portal.Value.sprite = sprite;
+            }
+        }
+
+        Vector2 PortalPosition(int from, int to, List<PortalTransit> path, float progress, out float scale,
+            bool showFlash = false)
+        {
+            // A hop has an approach, a collapse at the entrance, and a reveal at the exit.
+            // There is no interpolated position between the two mouths.
+            float phase = progress * (path.Count * 3 + 1);
+            scale = 1f;
+            foreach (var transit in path)
+            {
+                if (phase < 1f)
+                    return Vector2.Lerp(Point(from), Point(transit.Entrance), Mathf.SmoothStep(0f, 1f, phase));
+                if (phase < 2f)
+                {
+                    if (showFlash) RecordPortalFlash(transit.Entrance, phase - 1f);
+                    scale = 1f - Mathf.SmoothStep(0f, 1f, phase - 1f);
+                    return Point(transit.Entrance);
+                }
+                if (phase < 3f)
+                {
+                    if (showFlash) RecordPortalFlash(transit.Exit, 3f - phase);
+                    scale = Mathf.SmoothStep(0f, 1f, phase - 2f);
+                    return Point(transit.Exit);
+                }
+                from = transit.Exit;
+                phase -= 3f;
+            }
+            return Vector2.Lerp(Point(from), Point(to), Mathf.SmoothStep(0f, 1f, phase));
+        }
+
+        void Paint(Position source, Position target, float angle, float progress, List<PortalTransit>[] portalPaths = null)
+        {
+            float fraction = Mathf.SmoothStep(0f, 1f, progress);
             if (geometry != null) geometry.localRotation = Quaternion.Euler(0, 0, -angle);
+            portalFlashes.Clear();
             for (int i = 0; i < waters.Length; i++)
             {
-                waters[i].anchoredPosition = Vector2.Lerp(Point(source.Water[i]), Point(target.Water[i]), fraction);
+                float scale = 1f;
+                var path = portalPaths?[i];
+                var location = path == null
+                    ? Vector2.Lerp(Point(source.Water[i]), Point(target.Water[i]), fraction)
+                    : PortalPosition(source.Water[i], target.Water[i], path, progress, out scale, showFlash: true);
+                waters[i].anchoredPosition = location;
+                waters[i].localScale = waterScales[i] * scale;
                 if (waterMasks != null && i < waterMasks.Length)
                     waterMasks[i] = WaterMask(target.Water[i], target.Water);
-                if (i < foams.Length) foams[i].anchoredPosition = waters[i].anchoredPosition;
+                if (i < foams.Length) foams[i].anchoredPosition = location;
                 if (waterGlows != null && i < waterGlows.Length && waterGlows[i] != null)
-                    waterGlows[i].rectTransform.anchoredPosition = waters[i].anchoredPosition;
+                {
+                    var glow = waterGlows[i].rectTransform;
+                    glow.anchoredPosition = location;
+                    glow.localScale = Vector3.one * scale;
+                }
             }
+            PaintPortals();
             for (int i = 0; i < crates.Length; i++)
             {
                 int from = i < source.Boxes.Length ? source.Boxes[i] : -1;
@@ -974,7 +1092,11 @@ namespace WaterTurn
             if (fish != null)
             {
                 Vector2 from = Point(source.Fish), to = Point(target.Fish);
-                fish.anchoredPosition = Vector2.Lerp(from, to, fraction);
+                float scale = 1f;
+                var path = portalPaths?[target.Rider];
+                fish.anchoredPosition = path == null ? Vector2.Lerp(from, to, fraction)
+                    : PortalPosition(source.Fish, target.Fish, path, progress, out scale);
+                fish.localScale = Vector3.one * scale;
                 fish.localRotation = Quaternion.Euler(0, 0, angle);
                 fishFacing = ScreenFacing(to - from, angle);
             }
@@ -990,7 +1112,7 @@ namespace WaterTurn
             string pearlState = current.Pearl < 0 ? "" : "   ·   珍珠 " + (position.Pearl ? "1 / 1" : "0 / 1");
             hud.readout.text = "步数 " + history.Count + gateState + pearlState;
             hud.mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
-                (current.HasPortal ? "   ·   白框为传送门" : "") +
+                (current.HasPortal ? "   ·   蓝色光环为传送门" : "") +
                 (current.HasLatch ? "   ·   琥珀菱格为时效感应" : "") +
                 (current.HasValve ? "   ·   白箭头为单向阀" : "") +
                 (current.Plates.Length == 0 ? "" : "   ·   灰格只认箱子") +

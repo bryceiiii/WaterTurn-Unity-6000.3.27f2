@@ -216,9 +216,9 @@ namespace WaterTurn.Forge
                 default:
                     return new ForgePalette
                     {
-                        bg = Hex("0D181D"), panel = Hex("15242B"), panelAlt = Hex("1C3038"),
-                        line = Hex("2B4753"), text = Hex("E9F5F8"), dim = Hex("8FADB8"),
-                        accent = Hex("78EFEA"), accentDark = Hex("0D181D"),
+                        bg = Hex("101216"), panel = Hex("1C2026"), panelAlt = Hex("2A3038"),
+                        line = Hex("404853"), text = Hex("F0F1ED"), dim = Hex("ABB5BF"),
+                        accent = Hex("EDCA80"), accentDark = Hex("181512"),
                         wall = Hex("2A4753"), floor = Hex("1C3038"), water = Hex("2E8FB8"),
                         fish = Hex("FFC17C"), exit = Hex("7BE38F"), hazard = Hex("E06C5A"),
                         crate = Hex("C08A5E"), plate = Hex("9AA6A0"), valve = Hex("F2DE8C"),

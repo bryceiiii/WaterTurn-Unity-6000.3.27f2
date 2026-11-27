@@ -19,6 +19,9 @@ namespace WaterTurn
         public RectTransform[] water = new RectTransform[0];
         public RectTransform[] foam = new RectTransform[0];
 
+        [Tooltip("传送门画面，按盘面从左到右、从上到下排列。")]
+        public Image[] portals = new Image[0];
+
         public RectTransform player;
         [Tooltip("旧关卡只有一个箱子时用这个字段；新关卡请填 crates。")]
         public RectTransform crate;
