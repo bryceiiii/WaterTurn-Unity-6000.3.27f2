@@ -153,11 +153,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 43.217793
+      value: 56.471248
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 43.217793
+      value: 56.471248
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_LocalPosition.x
@@ -210,6 +210,42 @@ PrefabInstance:
     - target: {fileID: 8187609913905725719, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_Name
       value: Grate 2_3
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Sprite
+      value:
+      objectReference: {fileID: 6410907758376361897, guid: cbb0961724d63574990644f6fd18ef9a, type: 3}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.a
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_PreserveAspect
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1466510264890031179, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5621474884414923165, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8583395232404359960, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -2290,13 +2326,13 @@ RectTransform:
   - {fileID: 1673704411}
   - {fileID: 254367883}
   - {fileID: 518392108}
-  - {fileID: 56809068}
-  - {fileID: 627654089}
   - {fileID: 2105377906}
   - {fileID: 1831732987}
   - {fileID: 1606361677}
   - {fileID: 77306605}
   - {fileID: 379636851}
+  - {fileID: 56809068}
+  - {fileID: 627654089}
   - {fileID: 956392526}
   m_Father: {fileID: 1958705364}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -2365,11 +2401,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 43.217793
+      value: 56.471248
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 43.217793
+      value: 56.471248
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_LocalPosition.x
@@ -2422,6 +2458,42 @@ PrefabInstance:
     - target: {fileID: 8187609913905725719, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_Name
       value: Grate 5_3
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Sprite
+      value:
+      objectReference: {fileID: 6410907758376361897, guid: cbb0961724d63574990644f6fd18ef9a, type: 3}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.a
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_PreserveAspect
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1466510264890031179, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5621474884414923165, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8583395232404359960, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -3020,7 +3092,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WaterTurn.LevelDefinition
   levelIndex: 3
   levelName: "\u7ED5\u680F\u4E00\u7A0B"
-  hint: "\u51FA\u53E3\u5C31\u85CF\u5728\u6805\u680F\u540E\u9762\u3002\u6C34\u80FD\u4ECE\u680F\u7F1D\u6EF4\u8FC7\u53BB\uFF0C\u9C7C\u4E0D\u884C\u2014\u2014\u5148\u8BA9\u6C34\u53BB\u63A2\u8DEF\uFF0C\u518D\u627E\u7ED5\u8FC7\u53BB\u7684\u90A3\u4E00\u6B65\u3002"
+  hint: "出口就在地刺后面。水能流过地刺，但小鱼不能碰到它。先让水去探路，再找一条绕过去的路线。"
   rows:
   - '#######'
   - '#....##'
@@ -6028,11 +6100,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 44.946503
+      value: 57.623722
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 44.946503
+      value: 57.623722
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_LocalPosition.x

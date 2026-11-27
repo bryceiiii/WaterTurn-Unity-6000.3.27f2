@@ -9205,9 +9205,9 @@ RectTransform:
   - {fileID: 1171311968}
   - {fileID: 9300000002}
   - {fileID: 9300000006}
+  - {fileID: 1992394510}
   - {fileID: 1245294652}
   - {fileID: 1945362508}
-  - {fileID: 1992394510}
   - {fileID: 926353954}
   - {fileID: 1759130916}
   - {fileID: 264330945}
@@ -12621,19 +12621,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 78
+      value: 44.222
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 78
-      objectReference: {fileID: 0}
-    - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_LocalScale.x
-      value: 0.44222
-      objectReference: {fileID: 0}
-    - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_LocalScale.y
-      value: 0.44222
+      value: 44.222
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_LocalPosition.x

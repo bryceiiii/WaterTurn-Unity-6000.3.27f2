@@ -220,6 +220,7 @@ namespace WaterTurn.Forge.EditorTools
                 board.cell = cell;
 
                 // 地形：每格一块地砖，墙用 Tile_Wall，其余（地面/水/出口/鱼）都先铺 Tile_Floor。
+                RectTransform exit = null;
                 for (int y = 0; y < height; y++)
                 {
                     for (int x = 0; x < width; x++)
@@ -233,6 +234,8 @@ namespace WaterTurn.Forge.EditorTools
                         if (sprite == null)
                             throw new InvalidOperationException("Puny Dungeon 地形图集缺少瓦片。");
                         SetTerrainImage(terrain.GetComponent<Image>(), sprite, wall ? Color.white : ForgeTerrain.FloorTint);
+                        if (tile == 'E')
+                            exit = Add(board, tiles.exit, "Exit", Point(i, width, height, cell), cell);
                         if (wall)
                         {
                             var rock = (RectTransform)terrain.Find("Rock");
@@ -268,7 +271,7 @@ namespace WaterTurn.Forge.EditorTools
                 var waters = new List<RectTransform>();
                 var foams = new List<RectTransform>();
                 var crates = new List<RectTransform>();
-                RectTransform fish = null, exit = null, pearl = null, gate = null;
+                RectTransform fish = null, pearl = null, gate = null;
 
                 for (int y = 0; y < height; y++)
                 {
@@ -284,7 +287,6 @@ namespace WaterTurn.Forge.EditorTools
                             foams.Add(Add(board, tiles.foam, "Foam " + foams.Count, point, cell * 1.55f));
                         }
 
-                        if (tile == 'E') exit = AddScaled(board, tiles.exit, "Exit", point, cell * .78f, 78f);
                         if (tile == 'K') pearl = Add(board, tiles.pearl, "Pearl", point, cell * .32f);
                         if (tile == 'B' || tile == 'b')
                             crates.Add(Add(board, tiles.crate, "Crate " + crates.Count, point, cell * .84f));
@@ -328,19 +330,6 @@ namespace WaterTurn.Forge.EditorTools
         static Vector2 Point(int index, int width, int height, float cell) =>
             new Vector2((index % width - (width - 1) * .5f) * cell,
                 ((height - 1) * .5f - index / width) * cell);
-
-        /// <summary>
-        /// 出口预制体里有个 40px 的固定"洞"，缩 sizeDelta 会让洞盖住整块金框（大棋盘上看着就是一块黑格）。
-        /// 所以出口保持预制体原尺寸，用 localScale 整体缩放，洞和金框的比例才不会走样。
-        /// </summary>
-        static RectTransform AddScaled(LevelBoard board, GameObject prefab, string name, Vector2 point,
-            float targetSize, float nativeSize)
-        {
-            var rect = Add(board, prefab, name, point, nativeSize);
-            float k = targetSize / nativeSize;
-            rect.localScale = new Vector3(k, k, 1f);
-            return rect;
-        }
 
         static RectTransform Add(LevelBoard board, GameObject prefab, string name, Vector2 point, float size)
         {

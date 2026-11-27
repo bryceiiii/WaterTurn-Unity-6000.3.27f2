@@ -60,9 +60,9 @@ namespace WaterTurn.Forge
         readonly List<Image> portals = new List<Image>();
         readonly List<Text> glyphs = new List<Text>();
         int columns, rows;
-        float areaWidth, areaHeight;
+        float areaWidth, areaHeight, tileSize, propInset;
         bool interactive;
-        static Sprite water, fish;
+        static Sprite water, fish, exit;
 
         public int Columns => columns;
         public int Rows => rows;
@@ -107,10 +107,13 @@ namespace WaterTurn.Forge
                         tile == '#' || tile == '~' || tile == 'b' ? Color.white : ForgeTerrain.FloorTint;
 
                     var prop = props[index];
-                    prop.sprite = tile == 'P' || tile == 'B' || tile == 'b' || tile == '1' || tile == '2'
+                    prop.sprite = tile == 'E' || tile == 'P' || tile == 'B' || tile == 'b' || tile == '1' || tile == '2'
                         ? BrushSprite(tile) : null;
+                    float inset = tile == 'E' ? 0f : propInset;
+                    prop.rectTransform.anchoredPosition = new Vector2(inset, -inset);
+                    prop.rectTransform.sizeDelta = Vector2.one * (tileSize - 2f * inset);
                     var glyph = glyphs[index];
-                    glyph.text = prop.sprite == null ? style.glyph : "";
+                    glyph.text = prop.sprite != null ? "" : style.glyph;
                     glyph.color = style.fg;
                     prop.enabled = prop.sprite != null || glyph.text.Length > 0;
                     prop.color = prop.sprite != null ? Color.white : style.bg;
@@ -128,6 +131,7 @@ namespace WaterTurn.Forge
             {
                 case '#': return ForgeTerrain.WallPreview;
                 case '.': return ForgeTerrain.Floor;
+                case 'E': return exit != null ? exit : (exit = Resources.Load<Sprite>("Art/Ground/exit_rounded"));
                 case '~': return water != null ? water : (water = Resources.Load<Sprite>("Art/Water/water_0"));
                 case 'P': return fish != null ? fish : (fish = Resources.Load<Sprite>("Art/Fish/swim_right_0"));
                 case '1':
@@ -206,14 +210,15 @@ namespace WaterTurn.Forge
             columns = width;
             rows = height;
             float cell = Mathf.Max(1f, Mathf.Floor(Mathf.Min(areaWidth / width, areaHeight / height)));
+            tileSize = cell;
             float totalWidth = cell * width, totalHeight = cell * height;
 
             body = ForgeUi.Node(transform, "Cells");
             ForgeUi.Place(body, (areaWidth - totalWidth) * 0.5f, (areaHeight - totalHeight) * 0.5f, totalWidth, totalHeight);
             backing = ForgeUi.Box(body, "Backing", Color.black, 0, 0, totalWidth, totalHeight);
 
-            float inset = Mathf.Round(cell * .12f);
-            float propSize = cell - 2f * inset;
+            propInset = Mathf.Round(cell * .12f);
+            float propSize = cell - 2f * propInset;
             int fontSize = Mathf.Clamp(Mathf.RoundToInt(cell * .42f), 6, 24);
 
             for (int y = 0; y < height; y++)
@@ -225,7 +230,7 @@ namespace WaterTurn.Forge
                     image.color = Color.black;
                     image.raycastTarget = interactive;
                     cells.Add(image);
-                    var prop = ForgeUi.Box(rt, "Prop", Color.white, inset, inset, propSize, propSize);
+                    var prop = ForgeUi.Box(rt, "Prop", Color.white, propInset, propInset, propSize, propSize);
                     prop.preserveAspect = true;
                     props.Add(prop);
                     glyphs.Add(ForgeUi.Label(rt, "", fontSize, Color.white, TextAnchor.MiddleCenter, 0, 0, cell, cell, false));

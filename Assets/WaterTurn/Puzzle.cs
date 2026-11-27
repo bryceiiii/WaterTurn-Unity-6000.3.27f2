@@ -18,6 +18,19 @@ namespace WaterTurn
         }
     }
 
+    internal readonly struct BoxTransit
+    {
+        public readonly int From, To;
+        public readonly PortalTransit Portal;
+
+        public BoxTransit(int from, int to, PortalTransit portal)
+        {
+            From = from;
+            To = to;
+            Portal = portal;
+        }
+    }
+
     public sealed class Level
     {
         public readonly string Name, Hint;
@@ -161,12 +174,13 @@ namespace WaterTurn
             p != null && level.Tiles[p.Fish] == 'D';
 
         public static Position Apply(Level level, Position p, Move move, out Block block) =>
-            Apply(level, p, move, out block, null);
+            Apply(level, p, move, out block, null, out _);
 
         internal static Position Apply(Level level, Position p, Move move, out Block block,
-            List<PortalTransit>[] portalPaths)
+            List<PortalTransit>[] portalPaths, out BoxTransit? boxTransit)
         {
             block = Block.None;
+            boxTransit = null;
             if (move == Move.Turn || move == Move.TurnLeft)
             {
                 int turn = (p.Turn + (move == Move.Turn ? 1 : 3)) % 4;
@@ -195,9 +209,8 @@ namespace WaterTurn
             if (!p.HasBox(step))
                 return new Position(p.Water, rider, p.Boxes, p.Turn, p.Gate, hasPearl);
 
-            // 推箱：鱼站的那格必须是水，箱子沿同方向再走一格。
-            int dest = Step(level, step, direction);
-            if (!CanPushInto(level, dest, p))
+            int dest = PushDestination(level, p, step, direction, out boxTransit);
+            if (dest < 0)
             {
                 block = Block.Crate;
                 return null;
@@ -209,6 +222,23 @@ namespace WaterTurn
                 out block, portalPaths);
         }
 
+        static int PushDestination(Level level, Position p, int box, int direction, out BoxTransit? transit)
+        {
+            transit = null;
+            int entrance = Step(level, box, direction);
+            if (!CanPushInto(level, entrance, p)) return -1;
+
+            int exit = level.Portal[entrance];
+            if (exit < 0 || p.HasBox(exit)) return entrance;
+
+            // The box comes out one tile past the paired mouth, in the push direction.
+            // If that tile is blocked, the box stays at the mouth it was pushed onto.
+            int landing = Step(level, exit, direction);
+            if (!CanPushInto(level, landing, p) || level.Portal[landing] >= 0) return entrance;
+            transit = new BoxTransit(box, landing, new PortalTransit(entrance, exit));
+            return landing;
+        }
+
         static bool CanPushInto(Level level, int cell, Position p)
         {
             if (cell < 0) return false;
@@ -216,7 +246,6 @@ namespace WaterTurn
             if (tile == '#' || tile == 'G' || tile == 'E' || tile == 'M' || tile == 'o') return false;
             if ((tile == 'D' || tile == 'd') && !p.Gate) return false;
             if (p.HasBox(cell)) return false;
-            // 门格可以推上去：那就是把箱子当塞子用，门会失效。
             return true;
         }
 
@@ -282,8 +311,8 @@ namespace WaterTurn
             if (!p.HasBox(step))
                 return new Position(p.Water, rider, p.Boxes, p.Turn, p.Gate, hasPearl);
 
-            int dest = Step(level, step, direction);
-            if (!CanPushInto(level, dest, p)) return null;
+            int dest = PushDestination(level, p, step, direction, out _);
+            if (dest < 0) return null;
             var boxes = (int[])p.Boxes.Clone();
             boxes[Array.IndexOf(boxes, step)] = dest;
             Array.Sort(boxes);

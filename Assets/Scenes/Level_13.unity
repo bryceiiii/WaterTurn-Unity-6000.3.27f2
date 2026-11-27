@@ -706,7 +706,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WaterTurn.LevelDefinition
   levelIndex: 12
   levelName: "\u53CC\u5411\u56DE\u6D41"
-  hint: "\u540C\u4E00\u4E2A\u6805\u680F\u4F1A\u5728\u4E0D\u540C\u671D\u5411\u4E0B\u62E6\u4F4F\u4E0D\u540C\u7684\u6C34\u8DEF\u3002"
+  hint: "水能流过地刺，小鱼不能碰到。旋转前，先看载着小鱼的水会沿哪条路流动。"
   rows:
   - '########'
   - '#..#.###'
@@ -1907,11 +1907,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 35.982574
+      value: 47.0172297
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 35.982574
+      value: 47.0172297
       objectReference: {fileID: 0}
     - target: {fileID: 3251494024816791319, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_LocalPosition.x
@@ -1984,6 +1984,42 @@ PrefabInstance:
     - target: {fileID: 8187609913905725719, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
       propertyPath: m_Name
       value: Grate 19
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Sprite
+      value:
+      objectReference: {fileID: 6410907758376361897, guid: cbb0961724d63574990644f6fd18ef9a, type: 3}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Color.a
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3830684900477208602, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_PreserveAspect
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1466510264890031179, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5621474884414923165, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8583395232404359960, guid: 6430a8f00ab871a40bc80c8b0c8fd124, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -7609,14 +7645,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: Exit
       objectReference: {fileID: 0}
-    - target: {fileID: 1674824280058548307, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_SizeDelta.x
-      value: 19.190706
-      objectReference: {fileID: 0}
-    - target: {fileID: 1674824280058548307, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_SizeDelta.y
-      value: 19.190706
-      objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5
@@ -7643,11 +7671,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 37.421875
+      value: 47.976765
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 37.421875
+      value: 47.976765
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_LocalPosition.x

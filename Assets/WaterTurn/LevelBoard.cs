@@ -22,13 +22,18 @@ namespace WaterTurn
         [Tooltip("传送门画面，按盘面从左到右、从上到下排列。")]
         public Image[] portals = new Image[0];
 
+        [Tooltip("薄膜画面，按盘面从左到右、从上到下排列。")]
+        public Image[] membranes = new Image[0];
+
         public RectTransform player;
         [Tooltip("旧关卡只有一个箱子时用这个字段；新关卡请填 crates。")]
         public RectTransform crate;
         [Tooltip("箱子，顺序和 Position.Boxes 一致（升序）。")]
         public RectTransform[] crates = new RectTransform[0];
         public Image gate;
+        public Image gateFrame;
         public Image sensor;
+        public Image timedSensorButton;
         public Image pearl;
     }
 }

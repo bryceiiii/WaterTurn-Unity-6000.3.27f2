@@ -659,14 +659,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: Exit
       objectReference: {fileID: 0}
-    - target: {fileID: 1674824280058548307, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_SizeDelta.x
-      value: 17.891983
-      objectReference: {fileID: 0}
-    - target: {fileID: 1674824280058548307, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
-      propertyPath: m_SizeDelta.y
-      value: 17.891983
-      objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5
@@ -693,11 +685,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.x
-      value: 34.889366
+      value: 44.729958
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_SizeDelta.y
-      value: 34.889366
+      value: 44.729958
       objectReference: {fileID: 0}
     - target: {fileID: 8551595568213619010, guid: 482c14cdb80d93d4c9519872cd82bdcc, type: 3}
       propertyPath: m_LocalPosition.x
@@ -1794,7 +1786,7 @@ PrefabInstance:
     - target: {fileID: 7052109264173852698, guid: f8f2fe8860e3eef4b9687864bb0c1f39, type: 3}
       propertyPath: m_Sprite
       value: 
-      objectReference: {fileID: -1221774736571580821, guid: cbb0961724d63574990644f6fd18ef9a, type: 3}
+      objectReference: {fileID: -7092589907653258158, guid: cbb0961724d63574990644f6fd18ef9a, type: 3}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -7134,26 +7126,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1677521381}
     m_Modifications:
-    - target: {fileID: 1653434464341346389, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Sprite
-      value: 
-      objectReference: {fileID: -1164636438651811799, guid: ab4c52951f3706249b523fc99f717fd9, type: 3}
-    - target: {fileID: 1653434464341346389, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Color.a
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 1653434464341346389, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Color.b
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 1653434464341346389, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Color.g
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 1653434464341346389, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Color.r
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 1822211284200994693, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
       propertyPath: m_Pivot.x
       value: 0
@@ -7233,14 +7205,6 @@ PrefabInstance:
     - target: {fileID: 1822211284200994693, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 4107564869443241854, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_Color.a
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 4109992974889370584, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
-      propertyPath: m_IsActive
-      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 5645397796938467867, guid: 9302eb589826dd843bb1fab63c1e2fbd, type: 3}
       propertyPath: m_Name
@@ -7472,7 +7436,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WaterTurn.LevelDefinition
   levelIndex: 5
   levelName: "\u628A\u95E8\u585E\u4F4F"
-  hint: "\u6C34\u4F1A\u4ECE\u95E8\u91CC\u6F0F\u8D70\u3002\u628A\u7BB1\u5B50\u6CBF\u6C34\u9053\u63A8\u8FC7\u53BB\uFF0C\u6B63\u597D\u538B\u4F4F\u95E8\u53E3\uFF0C\u6C34\u5C31\u505C\u5728\u4F60\u60F3\u8BA9\u5B83\u505C\u7684\u5730\u65B9\u3002"
+  hint: "沿水道把箱子推进传送门。它会从另一端出来，堵住漏水的那一格。再转动房间，借留下的水到达出口。"
   rows:
   - '#########'
   - '####E####'

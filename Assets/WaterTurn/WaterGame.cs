@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -19,9 +20,13 @@ namespace WaterTurn
         static readonly Color Slate = new Color32(39, 59, 69, 255);
         static readonly Color Teal = new Color32(120, 239, 234, 255);
         static readonly Color Amber = new Color32(255, 193, 124, 255);
+        static readonly Color WaterTint = new Color(.88f, .98f, .99f, .94f);
+        static readonly Color WaterGlowTint = new Color(.10f, .82f, .88f, .10f);
         const float PortalFramesPerSecond = 8f;
         const int PortalIdleFrameCount = 4;
         const int PortalFlashFrameCount = 6;
+        const double UndoHoldDelay = .35;
+        const double UndoRepeatInterval = .12;
         static Sprite[] portalFrames;
 
         public static Sprite PortalSprite
@@ -83,14 +88,39 @@ namespace WaterTurn
         Sprite[][] waterVariants;
         int[] waterMasks;
         Button next, undo, home;
+        int? undoPointerId;
+        bool undoPointerRepeated;
+        int suppressUndoClickFrame = -1;
+        double pointerUndoAt = double.PositiveInfinity;
+        double keyboardUndoAt = double.PositiveInfinity;
+        double nextUndoRepeatAt;
         readonly List<Button> levels = new List<Button>();
-        readonly Stack<Position> history = new Stack<Position>();
+        readonly Stack<(Position Position, List<PortalTransit>[] PortalPaths, BoxPortalMotion BoxMotion)> history =
+            new Stack<(Position, List<PortalTransit>[], BoxPortalMotion)>();
+        Vector3[] crateScales;
+
+        sealed class BoxPortalMotion
+        {
+            public readonly BoxTransit Transit;
+            public readonly PortalTransit[] Path;
+
+            public BoxPortalMotion(BoxTransit transit)
+            {
+                Transit = transit;
+                Path = new[] { transit.Portal };
+            }
+
+            public BoxPortalMotion Reverse() => new BoxPortalMotion(new BoxTransit(Transit.To, Transit.From,
+                new PortalTransit(Transit.Portal.Exit, Transit.Portal.Entrance)));
+        }
         RectTransform[] waters, foams;
         Vector3[] waterScales;
         Image[] waterImages, foamImages;
         RectTransform fish, geometry;
         RectTransform[] crates;
-        Image gate, pearl, sensor;
+        Image gate, gateFrame, pearl, sensor;
+        bool gateTargetOpen;
+        float gateOpenAmount;
         RectTransform mechanismLayer, valveLayer;
         readonly Dictionary<int, Image> portalImages = new Dictionary<int, Image>();
         readonly Dictionary<int, int> portalFlashes = new Dictionary<int, int>();
@@ -98,6 +128,10 @@ namespace WaterTurn
         readonly List<int> plateCells = new List<int>();
         readonly List<Image> latchImages = new List<Image>();
         readonly List<int> latchCells = new List<int>();
+        Image timedSensorButton;
+        bool persistentSensorButton;
+        Vector2 timedSensorCenter, timedSensorDown;
+        float timedSensorTarget, timedSensorDepth, timedSensorVelocity;
         readonly List<Image> sensorImages = new List<Image>();
         readonly List<int> sensorCells = new List<int>();
         readonly List<Image> invertedGates = new List<Image>();
@@ -229,7 +263,30 @@ namespace WaterTurn
 
             home.onClick.AddListener(ReturnToHub);
             next.onClick.AddListener(Advance);
-            undo.onClick.AddListener(Undo);
+            undo.onClick.AddListener(() =>
+            {
+                if (suppressUndoClickFrame != Time.frameCount) Undo();
+            });
+            var undoEvents = undo.GetComponent<EventTrigger>() ?? undo.gameObject.AddComponent<EventTrigger>();
+            AddUndoPointerEvent(undoEvents, EventTriggerType.PointerDown, pointer =>
+            {
+                if (undoPointerId.HasValue || !undo.IsInteractable()) return;
+                undoPointerId = pointer.pointerId;
+                undoPointerRepeated = false;
+                pointerUndoAt = Time.unscaledTimeAsDouble + UndoHoldDelay;
+            });
+            AddUndoPointerEvent(undoEvents, EventTriggerType.PointerExit, pointer =>
+            {
+                if (undoPointerId == pointer.pointerId) pointerUndoAt = double.PositiveInfinity;
+            });
+            AddUndoPointerEvent(undoEvents, EventTriggerType.PointerUp, pointer =>
+            {
+                if (undoPointerId != pointer.pointerId) return;
+                // The UI module may dispatch a click immediately after PointerUp.
+                if (undoPointerRepeated) suppressUndoClickFrame = Time.frameCount;
+                undoPointerId = null;
+                pointerUndoAt = double.PositiveInfinity;
+            });
             hud.restart.onClick.AddListener(Restart);
             hud.hint.onClick.AddListener(Hint);
             hud.up.onClick.AddListener(() => Play(Move.Up));
@@ -250,6 +307,18 @@ namespace WaterTurn
                 levels.Add(button);
                 button.onClick.AddListener(() => WaterFx.GoToLevel(target));
             }
+        }
+
+        static void AddUndoPointerEvent(EventTrigger trigger, EventTriggerType type, System.Action<PointerEventData> handle)
+        {
+            var entry = new EventTrigger.Entry { eventID = type };
+            entry.callback.AddListener(data =>
+            {
+                if (data is PointerEventData pointer &&
+                    (type == EventTriggerType.PointerExit || pointer.button == PointerEventData.InputButton.Left))
+                    handle(pointer);
+            });
+            trigger.triggers.Add(entry);
         }
 
         void LoadArt()
@@ -380,7 +449,9 @@ namespace WaterTurn
         {
             int width = current.Width;
             int count = current.Width * current.Height;
-            bool Has(int cell) => cell >= 0 && cell < count && System.Array.IndexOf(water, cell) >= 0;
+            if (index == current.Exit) return 15;
+            bool Has(int cell) => cell >= 0 && cell < count && cell != current.Exit &&
+                System.Array.IndexOf(water, cell) >= 0;
 
             int mask = 0;
             if (!Has(index - width)) mask |= 1;   // open top
@@ -424,7 +495,7 @@ namespace WaterTurn
 
                 var image = glowObject.GetComponent<Image>();
                 image.sprite = waterGlowSprite;
-                image.color = new Color(0.10f, 0.82f, 0.88f, 0.10f);
+                image.color = WaterGlowTint;
                 image.raycastTarget = false;
                 waterGlows[i] = image;
             }
@@ -496,12 +567,14 @@ namespace WaterTurn
             AnimateWater();
             AnimateFish();
             PaintPortals();
+            AnimateTimedSensor();
+            AnimateLinkedGate();
             var keyboard = Keyboard.current;
-            if (keyboard == null) return;
             if (dying || leaving) return;
-            if (keyboard.escapeKey.wasPressedThisFrame) { ReturnToHub(); return; }
-            if (keyboard.rKey.wasPressedThisFrame) { Restart(); return; }
-            if (keyboard.zKey.wasPressedThisFrame) { Undo(); return; }
+            if (keyboard?.escapeKey.wasPressedThisFrame == true) { ReturnToHub(); return; }
+            if (keyboard?.rKey.wasPressedThisFrame == true) { Restart(); return; }
+            UpdateUndoHold(keyboard);
+            if (keyboard == null || keyboard.zKey.isPressed || keyboard.zKey.wasPressedThisFrame) return;
             if (keyboard.hKey.wasPressedThisFrame) { Hint(); return; }
             if (keyboard.tabKey.wasPressedThisFrame) { ToggleSidePanel(); return; }
             if (keyboard.qKey.wasPressedThisFrame) Play(Move.TurnLeft);
@@ -512,9 +585,41 @@ namespace WaterTurn
             else if (keyboard.leftArrowKey.wasPressedThisFrame || keyboard.aKey.wasPressedThisFrame) Play(Move.Left);
         }
 
+        void UpdateUndoHold(Keyboard keyboard)
+        {
+            double now = Time.unscaledTimeAsDouble;
+            if (keyboard?.zKey.wasPressedThisFrame == true)
+            {
+                keyboardUndoAt = now + UndoHoldDelay;
+                Undo();
+            }
+            if (keyboard?.zKey.isPressed != true) keyboardUndoAt = double.PositiveInfinity;
+
+            bool pointerHeld = now >= pointerUndoAt;
+            if ((!pointerHeld && now < keyboardUndoAt) || now < nextUndoRepeatAt || !CanUndo) return;
+            if (pointerHeld) undoPointerRepeated = true;
+            nextUndoRepeatAt = now + UndoRepeatInterval;
+            StartCoroutine(AnimateUndo(quick: true));
+        }
+
+        void CancelUndoHold()
+        {
+            undoPointerId = null;
+            pointerUndoAt = keyboardUndoAt = double.PositiveInfinity;
+            nextUndoRepeatAt = 0;
+        }
+
+        void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus) CancelUndoHold();
+        }
+
+        void OnDisable() => CancelUndoHold();
+
         /// <summary>Bind the puzzle to the board that is already in the scene.</summary>
         void Load()
         {
+            CancelUndoHold();
             current = definition.ToLevel();
             index = definition.levelIndex;
             history.Clear();
@@ -539,8 +644,6 @@ namespace WaterTurn
             {
                 waterImages[i] = waters[i].GetComponent<Image>();
                 waterScales[i] = waters[i].localScale;
-                if (waterImages[i] != null)
-                    waterImages[i].color = new Color(0.88f, 0.98f, 0.99f, 0.94f);
             }
             foamImages = new Image[foams.Length];
             for (int i = 0; i < foams.Length; i++)
@@ -558,7 +661,12 @@ namespace WaterTurn
             fish = boardView.player;
             fishImage = fish != null ? fish.GetComponent<Image>() : null;
             crates = ResolveCrates();
+            crateScales = new Vector3[crates.Length];
+            for (int i = 0; i < crates.Length; i++) crateScales[i] = crates[i].localScale;
             gate = boardView.gate;
+            gateFrame = boardView.gateFrame;
+            gateTargetOpen = position.Gate;
+            gateOpenAmount = position.Gate ? 1f : 0f;
             pearl = boardView.pearl;
             sensor = boardView.sensor;
             if (fishImage != null) fishImage.preserveAspect = true;
@@ -568,7 +676,7 @@ namespace WaterTurn
             leaving = dying = false;
             if (fish != null) fish.localScale = Vector3.one;
             Paint(position, position, position.Turn * 90f, 1);
-            hud.status.text = "把鱼送到金色出口。";
+            hud.status.text = "把鱼送到黑色圆角出口。";
             Refresh();
             ApplySidePanelHidden();
         }
@@ -603,6 +711,9 @@ namespace WaterTurn
             plateCells.Clear();
             latchImages.Clear();
             latchCells.Clear();
+            persistentSensorButton = current.Sensor >= 0 && !current.HasInvertedGate && sensor != null && gateFrame != null;
+            timedSensorButton = persistentSensorButton ? sensor : boardView.timedSensorButton;
+            timedSensorTarget = timedSensorDepth = timedSensorVelocity = 0f;
             sensorImages.Clear();
             sensorCells.Clear();
             invertedGates.Clear();
@@ -644,6 +755,7 @@ namespace WaterTurn
                     if (body != null) lastWater = Mathf.Max(lastWater, body.GetSiblingIndex());
             if (lastWater >= 0) valveLayer.SetSiblingIndex(lastWater + 1);
 
+            int membraneIndex = 0;
             for (int p = 0; p < current.Tiles.Length; p++)
             {
                 char tile = current.Tiles[p];
@@ -680,6 +792,7 @@ namespace WaterTurn
                 }
                 else if (tile == 's')
                 {
+                    if (p == current.Latch && timedSensorButton != null) continue;
                     // 时效感应格：琥珀色菱形，压住时转青——和闸门同色系，暗示它直接驱动闸门。
                     var latch = Box("Latch " + p, mechanismLayer, cell * .58f, cell * .58f,
                         new Color32(255, 188, 112, 255));
@@ -691,6 +804,8 @@ namespace WaterTurn
                 }
                 else if (tile == 'M')
                 {
+                    if (membraneIndex < boardView.membranes.Length && boardView.membranes[membraneIndex++] != null)
+                        continue;
                     // 薄膜：半透明的筛面。水进不来，鱼能直接穿过去，
                     // 所以它画得比墙"薄"——看得见后面的地板，才像能穿。
                     var film = Box("Membrane " + p, mechanismLayer, cell * .94f, cell * .94f,
@@ -751,6 +866,7 @@ namespace WaterTurn
                 }
                 else if (tile == 'S')
                 {
+                    if (persistentSensorButton && p == current.Sensor) continue;
                     // 感应格：只有逆闸关卡的场景里是白模（其余关卡场景里摆的是预制体）。
                     // 它画在水面之上——"水正压着它、门正关着"必须一眼看得见。
                     var node = Box("Sensor " + p, valveLayer, cell * .62f, cell * .62f,
@@ -887,7 +1003,8 @@ namespace WaterTurn
         {
             if (won || busy || dying || position == null) return;
             var portalPaths = current.HasPortal ? new List<PortalTransit>[position.Water.Length] : null;
-            Position result = Puzzle.Apply(current, position, move, out Block block, portalPaths);
+            Position result = Puzzle.Apply(current, position, move, out Block block, portalPaths, out var boxTransit);
+            var boxMotion = boxTransit.HasValue ? new BoxPortalMotion(boxTransit.Value) : null;
             if (result == null)
             {
                 // Grates are lethal too: the move that would drag the fish into the
@@ -900,7 +1017,7 @@ namespace WaterTurn
                     Position lethal = Puzzle.ApplyLethal(current, position, move, out bool touched);
                     if (lethal != null && touched)
                     {
-                        StartCoroutine(Animate(move, lethal, true));
+                        StartCoroutine(Animate(move, lethal, true, boxMotion: boxMotion));
                         return;
                     }
                 }
@@ -914,10 +1031,11 @@ namespace WaterTurn
             // Rotating is always allowed, even when the turn would carry the fish
             // into a gate. The gate is what kills; the turn is just how the fish
             // got there — Animate's gate check handles it once the room settles.
-            StartCoroutine(Animate(move, result, portalPaths: portalPaths));
+            StartCoroutine(Animate(move, result, portalPaths: portalPaths, boxMotion: boxMotion));
         }
 
-        IEnumerator Animate(Move move, Position result, bool fatal = false, List<PortalTransit>[] portalPaths = null)
+        IEnumerator Animate(Move move, Position result, bool fatal = false, List<PortalTransit>[] portalPaths = null,
+            BoxPortalMotion boxMotion = null)
         {
             busy = true;
             Position source = position;
@@ -926,24 +1044,14 @@ namespace WaterTurn
             {
                 PlaySplash();
                 float direction = move == Move.Turn ? 1f : -1f;
-                for (float t = 0; t < .19f; t += Time.unscaledDeltaTime)
-                {
-                    Paint(source, source, angle + direction * 90 * Mathf.SmoothStep(0, 1, t / .19f), 0);
-                    yield return null;
-                }
+                yield return RotateBoard(source, angle, direction * 90f, .19f);
                 angle += direction * 90;
             }
-            int mostTransits = 0;
-            if (portalPaths != null)
-                foreach (var path in portalPaths)
-                    if (path != null) mostTransits = Mathf.Max(mostTransits, path.Count);
-            float duration = mostTransits == 0 ? .16f : Mathf.Min(1.6f, .4f + mostTransits * .4f);
-            for (float t = 0; t < duration; t += Time.unscaledDeltaTime)
-            {
-                Paint(source, result, angle, t / duration, portalPaths);
-                yield return null;
-            }
-            history.Push(source);
+            int mostTransits = CountLongestPortalPath(portalPaths);
+            if (mostTransits == 0) portalPaths = null;
+            if (boxMotion != null) mostTransits = Mathf.Max(1, mostTransits);
+            yield return SlideBoard(source, result, angle, SlideDuration(mostTransits), portalPaths, boxMotion: boxMotion);
+            history.Push((source, portalPaths, boxMotion));
             position = result;
             won = Puzzle.Won(current, result);
             busy = false;
@@ -969,7 +1077,7 @@ namespace WaterTurn
             else if (Puzzle.OnGate(current, position) || fatal)
                 StartCoroutine(DeathSequence(Puzzle.OnGate(current, position)
                     ? "小鱼碰到了闸门 —— 冷光一闪。"
-                    : "小鱼撞上了栅栏。"));
+                    : "小鱼撞上了危险障碍。"));
             else
                 hud.status.text =
                     !source.Pearl && result.Pearl ? "已收集珍珠。现在可以交付了。" :
@@ -979,6 +1087,7 @@ namespace WaterTurn
                         ? "箱子压住重压格，闸门已打开。"
                         : current.HasInvertedGate ? "感应格让开，逆闸重新放行。" : "感应格进水，闸门已打开。") :
                     result.Fish == current.Exit ? "先收集珍珠，出口才会开启。" :
+                    boxMotion != null ? "箱子已穿过传送门，留意另一端的水路。" :
                     !SameBoxes(source, result) ? "箱子已移位，留意新的水路。" : "水已落定。";
             if (won && index == unlocked && index < Campaign.VisibleLevels - 1)
             {
@@ -989,6 +1098,36 @@ namespace WaterTurn
             Paint(result, result, result.Turn * 90f, 1);
             Refresh();
         }
+
+        IEnumerator RotateBoard(Position state, float angle, float turn, float duration)
+        {
+            for (float t = 0; t < duration; t += Time.unscaledDeltaTime)
+            {
+                Paint(state, state, angle + turn * Mathf.SmoothStep(0f, 1f, t / duration), 0f);
+                yield return null;
+            }
+        }
+
+        IEnumerator SlideBoard(Position source, Position target, float angle, float duration,
+            List<PortalTransit>[] portalPaths, bool reversing = false, BoxPortalMotion boxMotion = null)
+        {
+            for (float t = 0; t < duration; t += Time.unscaledDeltaTime)
+            {
+                Paint(source, target, angle, t / duration, portalPaths, reversing, boxMotion);
+                yield return null;
+            }
+        }
+
+        static int CountLongestPortalPath(List<PortalTransit>[] portalPaths)
+        {
+            int longest = 0;
+            if (portalPaths != null)
+                foreach (var path in portalPaths)
+                    if (path != null) longest = Mathf.Max(longest, path.Count);
+            return longest;
+        }
+
+        static float SlideDuration(int transits) => transits == 0 ? .16f : Mathf.Min(1.6f, .4f + transits * .4f);
 
         void RecordPortalFlash(int cell, float progress)
         {
@@ -1010,7 +1149,7 @@ namespace WaterTurn
             }
         }
 
-        Vector2 PortalPosition(int from, int to, List<PortalTransit> path, float progress, out float scale,
+        Vector2 PortalPosition(int from, int to, IReadOnlyList<PortalTransit> path, float progress, out float scale,
             bool showFlash = false)
         {
             // A hop has an approach, a collapse at the entrance, and a reveal at the exit.
@@ -1039,11 +1178,46 @@ namespace WaterTurn
             return Vector2.Lerp(Point(from), Point(to), Mathf.SmoothStep(0f, 1f, phase));
         }
 
-        void Paint(Position source, Position target, float angle, float progress, List<PortalTransit>[] portalPaths = null)
+        void AnimateTimedSensor()
+        {
+            if (timedSensorButton == null) return;
+            timedSensorDepth = Mathf.SmoothDamp(timedSensorDepth, timedSensorTarget, ref timedSensorVelocity,
+                .085f, Mathf.Infinity, Time.unscaledDeltaTime);
+            var rect = timedSensorButton.rectTransform;
+            rect.anchoredPosition = timedSensorCenter - timedSensorDown * (cell * .12f * (1f - timedSensorDepth));
+            rect.localScale = Vector3.one * Mathf.Lerp(1f, .88f, timedSensorDepth);
+            timedSensorButton.color = Color32.Lerp(
+                new Color32(255, 188, 112, 255), new Color32(120, 239, 234, 255), timedSensorDepth);
+        }
+
+        void AnimateLinkedGate()
+        {
+            if (gate == null || gateFrame == null) return;
+            gateOpenAmount = Mathf.MoveTowards(gateOpenAmount, gateTargetOpen ? 1f : 0f,
+                Time.unscaledDeltaTime / (gateTargetOpen ? .14f : .19f));
+            float open = Mathf.SmoothStep(0f, 1f, gateOpenAmount);
+            var rect = gate.rectTransform;
+            rect.anchoredPosition = gateFrame.rectTransform.anchoredPosition + Vector2.up * (rect.rect.height * .44f * open);
+            rect.localScale = new Vector3(1f, Mathf.Lerp(1f, .12f, open), 1f);
+            gate.color = new Color(1f, 1f, 1f, 1f - Mathf.SmoothStep(0f, 1f, (open - .75f) * 4f));
+        }
+
+        void Paint(Position source, Position target, float angle, float progress,
+            List<PortalTransit>[] portalPaths = null, bool reversing = false, BoxPortalMotion boxMotion = null)
         {
             float fraction = Mathf.SmoothStep(0f, 1f, progress);
             if (geometry != null) geometry.localRotation = Quaternion.Euler(0, 0, -angle);
             portalFlashes.Clear();
+            Vector2 exitCenter = current.Exit >= 0 ? Point(current.Exit) : Vector2.zero;
+            int buttonCell = persistentSensorButton ? current.Sensor : current.Latch;
+            bool paintTimedSensor = timedSensorButton != null && buttonCell >= 0;
+            if (paintTimedSensor)
+            {
+                timedSensorCenter = Point(buttonCell);
+                timedSensorDown = Quaternion.Euler(0f, 0f, angle) * Vector2.down;
+                // Water pressure controls the button, even after its gate has latched open.
+                timedSensorTarget = 0f;
+            }
             for (int i = 0; i < waters.Length; i++)
             {
                 float scale = 1f;
@@ -1051,8 +1225,24 @@ namespace WaterTurn
                 var location = path == null
                     ? Vector2.Lerp(Point(source.Water[i]), Point(target.Water[i]), fraction)
                     : PortalPosition(source.Water[i], target.Water[i], path, progress, out scale, showFlash: true);
+                if (paintTimedSensor && (source.Water[i] == buttonCell || target.Water[i] == buttonCell))
+                {
+                    float distance = Vector2.Distance(location, timedSensorCenter);
+                    float contact = 1f - Mathf.SmoothStep(0f, 1f, distance / (cell * .65f));
+                    timedSensorTarget = Mathf.Max(timedSensorTarget, contact);
+                }
+                float exitBlend = current.Exit >= 0
+                    ? 1f - Mathf.SmoothStep(0f, 1f, Vector2.Distance(location, exitCenter) / (cell * .6f))
+                    : 0f;
+                scale *= Mathf.Lerp(1f, .68f, exitBlend);
                 waters[i].anchoredPosition = location;
                 waters[i].localScale = waterScales[i] * scale;
+                if (waterImages[i] != null)
+                {
+                    var tint = WaterTint;
+                    tint.a = Mathf.Lerp(tint.a, .54f, exitBlend);
+                    waterImages[i].color = tint;
+                }
                 if (waterMasks != null && i < waterMasks.Length)
                     waterMasks[i] = WaterMask(target.Water[i], target.Water);
                 if (i < foams.Length) foams[i].anchoredPosition = location;
@@ -1061,18 +1251,31 @@ namespace WaterTurn
                     var glow = waterGlows[i].rectTransform;
                     glow.anchoredPosition = location;
                     glow.localScale = Vector3.one * scale;
+                    var tint = WaterGlowTint;
+                    tint.a *= 1f - exitBlend;
+                    waterGlows[i].color = tint;
                 }
             }
-            PaintPortals();
             for (int i = 0; i < crates.Length; i++)
             {
                 int from = i < source.Boxes.Length ? source.Boxes[i] : -1;
                 int to = i < target.Boxes.Length ? target.Boxes[i] : -1;
                 if (to < 0) continue;
-                crates[i].anchoredPosition = from >= 0
-                    ? Vector2.Lerp(Point(from), Point(to), fraction)
-                    : Point(to);
+                float scale = 1f;
+                if (boxMotion != null)
+                {
+                    // Box indices can change when the teleported box is sorted into its new cell.
+                    crates[i].anchoredPosition = to == boxMotion.Transit.To
+                        ? PortalPosition(boxMotion.Transit.From, to, boxMotion.Path, progress, out scale, showFlash: true)
+                        : Point(to);
+                }
+                else
+                    crates[i].anchoredPosition = from >= 0
+                        ? Vector2.Lerp(Point(from), Point(to), fraction)
+                        : Point(to);
+                crates[i].localScale = crateScales[i] * scale;
             }
+            PaintPortals();
             for (int i = 0; i < plateImages.Count; i++)
                 plateImages[i].color = target.HasBox(plateCells[i])
                     ? new Color32(120, 239, 234, 255)
@@ -1093,15 +1296,19 @@ namespace WaterTurn
             {
                 Vector2 from = Point(source.Fish), to = Point(target.Fish);
                 float scale = 1f;
-                var path = portalPaths?[target.Rider];
+                var path = portalPaths?[reversing ? source.Rider : target.Rider];
                 fish.anchoredPosition = path == null ? Vector2.Lerp(from, to, fraction)
                     : PortalPosition(source.Fish, target.Fish, path, progress, out scale);
                 fish.localScale = Vector3.one * scale;
                 fish.localRotation = Quaternion.Euler(0, 0, angle);
                 fishFacing = ScreenFacing(to - from, angle);
             }
-            if (gate != null) gate.color = target.Gate ? new Color32(255, 193, 124, 53) : Amber;
-            if (sensor != null) sensor.color = target.Gate ? Teal : new Color32(55, 120, 124, 255);
+            if (gateFrame != null)
+                gateTargetOpen = target.Gate || (source.Gate && progress < .8f);
+            else if (gate != null)
+                gate.color = target.Gate ? new Color32(255, 193, 124, 53) : Amber;
+            if (sensor != null && !persistentSensorButton)
+                sensor.color = target.Gate ? Teal : new Color32(55, 120, 124, 255);
             if (pearl != null) pearl.enabled = !target.Pearl;
         }
 
@@ -1113,13 +1320,14 @@ namespace WaterTurn
             hud.readout.text = "步数 " + history.Count + gateState + pearlState;
             hud.mechanism.text = Campaign.Chapters[Campaign.Chapter(index)] +
                 (current.HasPortal ? "   ·   蓝色光环为传送门" : "") +
-                (current.HasLatch ? "   ·   琥珀菱格为时效感应" : "") +
+                (current.HasLatch ? "   ·   感应格进水时亮青色" : "") +
                 (current.HasValve ? "   ·   白箭头为单向阀" : "") +
                 (current.Plates.Length == 0 ? "" : "   ·   灰格只认箱子") +
                 (current.HasMembrane ? "   ·   细网为薄膜，鱼能穿" : "") +
                 (current.HasSpring ? "   ·   石沿水眼为泉眼，永不滑动" : "") +
                 (current.HasInvertedGate ? "   ·   青闸默认常开，水压感应格才关" : "") +
-                (current.Sensor >= 0 && !current.HasInvertedGate ? "   ·   青色为感应格" : "") +
+                (persistentSensorButton ? "   ·   按钮有水时亮青" :
+                    current.Sensor >= 0 && !current.HasInvertedGate ? "   ·   青色为感应格" : "") +
                 (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
             // Clearing a chamber always returns to the tidal cave, so the panel
@@ -1221,7 +1429,10 @@ namespace WaterTurn
         void Restart()
         {
             if (dying) return;
-            if (LevelManager.Instance == null) Load();
+            if (LevelManager.Instance == null)
+            {
+                if (!busy) Load();
+            }
             else WaterFx.RestartLevelWithIris();
         }
 
@@ -1247,11 +1458,53 @@ namespace WaterTurn
         }
 #endif
 
+        bool CanUndo => !busy && !leaving && !dying && history.Count > 0;
+
         void Undo()
         {
-            if (busy || history.Count == 0) return;
-            position = history.Pop();
+            if (CanUndo) StartCoroutine(AnimateUndo(quick: false));
+        }
+
+        IEnumerator AnimateUndo(bool quick)
+        {
+            busy = true;
+            undo.interactable = false;
+            var source = position;
+            var previous = history.Pop();
+            var target = previous.Position;
+            var portalPaths = previous.PortalPaths;
+            var boxMotion = previous.BoxMotion?.Reverse();
+            if (portalPaths != null)
+            {
+                // This history entry has been consumed, so its paths can be reversed in place.
+                foreach (var path in portalPaths)
+                {
+                    if (path == null) continue;
+                    path.Reverse();
+                    for (int i = 0; i < path.Count; i++)
+                        path[i] = new PortalTransit(path[i].Exit, path[i].Entrance);
+                }
+            }
+
+            float angle = source.Turn * 90f;
+            float turn = Mathf.DeltaAngle(angle, target.Turn * 90f);
+            bool moved = source.Fish != target.Fish || !SameBoxes(source, target);
+            for (int i = 0; i < source.Water.Length && !moved; i++)
+                moved = source.Water[i] != target.Water[i];
+            if (moved || portalPaths != null || boxMotion != null)
+            {
+                int mostTransits = CountLongestPortalPath(portalPaths);
+                if (boxMotion != null) mostTransits = Mathf.Max(1, mostTransits);
+                yield return SlideBoard(source, target, angle,
+                    SlideDuration(mostTransits) * (quick ? .5f : 1f),
+                    portalPaths, reversing: true, boxMotion: boxMotion);
+            }
+            if (turn != 0f)
+                yield return RotateBoard(target, angle, turn, quick ? .18f : .24f);
+
+            position = target;
             won = false;
+            busy = false;
             hud.status.text = "已恢复到上一步。";
             Paint(position, position, position.Turn * 90f, 1);
             Refresh();

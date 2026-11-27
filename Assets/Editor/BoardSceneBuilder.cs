@@ -12,7 +12,7 @@ namespace WaterTurn.EditorTools
     /// 按 <see cref="Campaign"/> 重建一批关卡场景：盘面取自关卡数据，预制体沿用
     /// Assets/Prefabs 里现成的那套。传送门、重压格、阀门、时效感应格、薄膜、泉眼、
     /// 逆闸、感应格都是运行时白模，由 <see cref="WaterGame"/> 现场生成，
-    /// 所以这里只落地地板、墙、水、鱼、箱子、出口和石门。
+    /// 所以这里只落地地板、墙、水、鱼、箱子、出口、珍珠和石门。
     /// </summary>
     public static class BoardSceneBuilder
     {
@@ -29,6 +29,7 @@ namespace WaterTurn.EditorTools
             var crate = Load("Assets/Prefabs/Board/Obstacle_Crate.prefab");
             var gate = Load("Assets/Prefabs/Board/Mechanism_Gate.prefab");
             var exit = Load("Assets/Prefabs/Board/Prop_Exit.prefab");
+            var pearl = Load("Assets/Prefabs/Board/Prop_Pearl.prefab");
 
             foreach (int index in indices)
             {
@@ -69,7 +70,7 @@ namespace WaterTurn.EditorTools
                 board.room = room;
                 board.cell = cell;
 
-                RectTransform gateView = null, exitView = null;
+                RectTransform gateView = null, exitView = null, pearlView = null;
                 for (int p = 0; p < level.Tiles.Length; p++)
                 {
                     char tile = level.Tiles[p];
@@ -79,13 +80,11 @@ namespace WaterTurn.EditorTools
                         Instance(floor, room, Point(p), new Vector2(cell - 2, cell - 2), "Floor " + p);
 
                     if (tile == 'E')
-                    {
-                        exitView = Instance(exit, room, Point(p), new Vector2(cell * .78f, cell * .78f), "Exit");
-                        var hole = exitView.Find("Exit Hole") as RectTransform;
-                        if (hole != null) hole.sizeDelta = new Vector2(cell * .40f, cell * .40f);
-                    }
+                        exitView = Instance(exit, room, Point(p), new Vector2(cell, cell), "Exit");
                     if (tile == 'D')
                         gateView = Instance(gate, room, Point(p), new Vector2(cell - 12, cell - 12), "Gate");
+                    if (tile == 'K')
+                        pearlView = Instance(pearl, room, Point(p), Vector2.one * (cell * .32f), "Pearl");
                 }
 
                 var waters = new RectTransform[begin.Water.Length];
@@ -112,6 +111,7 @@ namespace WaterTurn.EditorTools
                 board.crate = crates.Length > 0 ? crates[0] : null;
                 board.crates = crates;
                 board.gate = gateView != null ? gateView.GetComponent<Image>() : null;
+                board.pearl = pearlView != null ? pearlView.GetComponent<Image>() : null;
                 board.water = waters;
                 board.foam = foams;
 
