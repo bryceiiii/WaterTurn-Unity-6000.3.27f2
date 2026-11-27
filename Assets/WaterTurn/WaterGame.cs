@@ -129,7 +129,7 @@ namespace WaterTurn
         readonly List<Image> latchImages = new List<Image>();
         readonly List<int> latchCells = new List<int>();
         Image timedSensorButton;
-        bool persistentSensorButton;
+        bool authoredSensorButton;
         Vector2 timedSensorCenter, timedSensorDown;
         float timedSensorTarget, timedSensorDepth, timedSensorVelocity;
         readonly List<Image> sensorImages = new List<Image>();
@@ -711,8 +711,8 @@ namespace WaterTurn
             plateCells.Clear();
             latchImages.Clear();
             latchCells.Clear();
-            persistentSensorButton = current.Sensor >= 0 && !current.HasInvertedGate && sensor != null && gateFrame != null;
-            timedSensorButton = persistentSensorButton ? sensor : boardView.timedSensorButton;
+            authoredSensorButton = current.Sensor >= 0 && sensor != null && gateFrame != null;
+            timedSensorButton = authoredSensorButton ? sensor : boardView.timedSensorButton;
             timedSensorTarget = timedSensorDepth = timedSensorVelocity = 0f;
             sensorImages.Clear();
             sensorCells.Clear();
@@ -844,6 +844,7 @@ namespace WaterTurn
                 }
                 else if (tile == 'd')
                 {
+                    if (gate != null && gateFrame != null) continue;
                     // 逆闸：常开的水口。外框一直在，闸板开着时几乎透明、关上才实心——
                     // 玩家因此能随时读出"这道水口现在是通是堵"。
                     Vector2 center = Point(p);
@@ -866,7 +867,7 @@ namespace WaterTurn
                 }
                 else if (tile == 'S')
                 {
-                    if (persistentSensorButton && p == current.Sensor) continue;
+                    if (authoredSensorButton && p == current.Sensor) continue;
                     // 感应格：只有逆闸关卡的场景里是白模（其余关卡场景里摆的是预制体）。
                     // 它画在水面之上——"水正压着它、门正关着"必须一眼看得见。
                     var node = Box("Sensor " + p, valveLayer, cell * .62f, cell * .62f,
@@ -1209,7 +1210,7 @@ namespace WaterTurn
             if (geometry != null) geometry.localRotation = Quaternion.Euler(0, 0, -angle);
             portalFlashes.Clear();
             Vector2 exitCenter = current.Exit >= 0 ? Point(current.Exit) : Vector2.zero;
-            int buttonCell = persistentSensorButton ? current.Sensor : current.Latch;
+            int buttonCell = authoredSensorButton ? current.Sensor : current.Latch;
             bool paintTimedSensor = timedSensorButton != null && buttonCell >= 0;
             if (paintTimedSensor)
             {
@@ -1307,7 +1308,7 @@ namespace WaterTurn
                 gateTargetOpen = target.Gate || (source.Gate && progress < .8f);
             else if (gate != null)
                 gate.color = target.Gate ? new Color32(255, 193, 124, 53) : Amber;
-            if (sensor != null && !persistentSensorButton)
+            if (sensor != null && !authoredSensorButton)
                 sensor.color = target.Gate ? Teal : new Color32(55, 120, 124, 255);
             if (pearl != null) pearl.enabled = !target.Pearl;
         }
@@ -1326,7 +1327,7 @@ namespace WaterTurn
                 (current.HasMembrane ? "   ·   细网为薄膜，鱼能穿" : "") +
                 (current.HasSpring ? "   ·   石沿水眼为泉眼，永不滑动" : "") +
                 (current.HasInvertedGate ? "   ·   青闸默认常开，水压感应格才关" : "") +
-                (persistentSensorButton ? "   ·   按钮有水时亮青" :
+                (authoredSensorButton ? "   ·   按钮有水时亮青" :
                     current.Sensor >= 0 && !current.HasInvertedGate ? "   ·   青色为感应格" : "") +
                 (current.Pearl < 0 ? "" : "   ·   金色小格为珍珠");
             undo.interactable = history.Count > 0;
