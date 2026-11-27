@@ -7589,6 +7589,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Crate 0
       objectReference: {fileID: 0}
+    - target: {fileID: 2713487354808014543, guid: f8f2fe8860e3eef4b9687864bb0c1f39, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 4175450962765920643, guid: f8f2fe8860e3eef4b9687864bb0c1f39, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5
@@ -11378,6 +11382,7 @@ MonoBehaviour:
   - {fileID: 726695869}
   - {fileID: 1087523330}
   - {fileID: 555330531}
+  portals: []
   player: {fileID: 2114942558}
   crate: {fileID: 1245294652}
   crates:
