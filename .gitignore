@@ -107,3 +107,12 @@ desktop.ini
 
 # 像素素材实验的本地合成/对比图与脚本（不纳入版本库）
 /Preview/puny/
+
+# JellyRun 像素素材实验：本地合成图与未进入场景的下载素材包
+# 注：Pixel-16px Underwater/tileset 被 JellyRunTiles.cs 运行时加载，保留
+/AgentScripts/*.png
+/Assets/[Ss]creenshots/
+/Assets/Resources/ManualArt/underwater-diving-files/
+/Assets/Resources/ManualArt/underwater-diving-files.meta
+/Assets/Resources/ManualArt/Pixel-16px Underwater/Pixel-16px Underwater/bubble_*
+/Assets/Resources/ManualArt/Pixel-16px Underwater/Pixel-16px Underwater/parallax*

@@ -217,6 +217,14 @@ namespace WaterTurn
             PlayerPrefs.Save();
         }
 
+        // Seabed props are scattered once every Awake has run.  Creating canvas
+        // children during Awake makes Unity drop their layout callbacks
+        // ("SendMessage cannot be called during Awake").
+        void Start()
+        {
+            JellyRunDeco.Build(worldRoot);
+        }
+
         void Update()
         {
             ReadDiscreteInput();
