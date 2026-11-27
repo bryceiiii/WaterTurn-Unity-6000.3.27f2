@@ -261,6 +261,7 @@ MonoBehaviour:
   - {fileID: 1887611699}
   - {fileID: 1149624188}
   - {fileID: 1259473505}
+  portals: []
   player: {fileID: 1553118477}
   crate: {fileID: 0}
   crates: []
@@ -4357,6 +4358,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Water 2
       objectReference: {fileID: 0}
+    - target: {fileID: 3382660797775483204, guid: 5c4efb000c61b2242aa0a19a33cee2c6, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -4767,6 +4772,10 @@ PrefabInstance:
     - target: {fileID: 4671539597305459649, guid: 3912abf5ede88724f9a0b79e1af6a962, type: 3}
       propertyPath: m_Name
       value: Foam 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 4671539597305459649, guid: 3912abf5ede88724f9a0b79e1af6a962, type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
