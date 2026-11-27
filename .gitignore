@@ -104,3 +104,6 @@ desktop.ini
 
 # Play 模式抓帧（本地校验用）
 /AgentScripts/shots/
+
+# 像素素材实验的本地合成/对比图与脚本（不纳入版本库）
+/Preview/puny/
