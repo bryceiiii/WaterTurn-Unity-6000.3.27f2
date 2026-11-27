@@ -73,6 +73,11 @@ namespace WaterTurn
         bool panelHidden;
         bool leaving;
 
+        AudioSource splashSource;
+        AudioClip[] splashClips;
+        int lastSplash = -1;
+        const float SplashVolume = .55f;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
@@ -101,6 +106,7 @@ namespace WaterTurn
             hud.ApplySkin(font, MakeRounded());
             FishArt.Swim(fishFacing);   // loads all four sets up front
             LoadArt();
+            LoadSplashAudio();
             EnsureTurnButtons();
             WireHud();
             Load();
@@ -215,6 +221,53 @@ namespace WaterTurn
                 if (frame != null) foam.Add(frame);
             }
             foamFrames = foam.ToArray();
+        }
+
+        // ------------------------------------------------------------- room audio
+
+        /// <summary>
+        /// The two splash takes that ship under Resources/Audio are the only sound
+        /// in a chamber: one plays every time the room turns.  They are loaded up
+        /// front so the first turn of a level does not stutter.
+        /// </summary>
+        void LoadSplashAudio()
+        {
+            var clips = new List<AudioClip>();
+            for (int i = 1; i <= 2; i++)
+            {
+                var clip = Resources.Load<AudioClip>("Audio/splash" + i);
+                if (clip != null) clips.Add(clip);
+            }
+            if (clips.Count == 0)
+            {
+                Debug.LogWarning("WaterTurn: 缺少流水音效（Resources/Audio/splash1..2），转动房间将没有声音。");
+                return;
+            }
+
+            splashClips = clips.ToArray();
+            splashSource = gameObject.AddComponent<AudioSource>();
+            splashSource.playOnAwake = false;
+            splashSource.loop = false;
+            splashSource.spatialBlend = 0f;   // pure 2D: the room turns, not a point in space
+            splashSource.volume = 1f;
+        }
+
+        /// <summary>
+        /// One splash per turn.  The takes alternate (randomised, never the same
+        /// one twice) and the pitch drifts a little, so mashing Space does not
+        /// turn into a machine gun.  The previous take is cut because the clip is
+        /// a full second while a turn only lasts about .35 s.
+        /// </summary>
+        void PlaySplash()
+        {
+            if (splashSource == null || splashClips == null || splashClips.Length == 0) return;
+            int pick = splashClips.Length == 1
+                ? 0
+                : (lastSplash + 1 + Random.Range(0, splashClips.Length - 1)) % splashClips.Length;
+            lastSplash = pick;
+            splashSource.Stop();
+            splashSource.pitch = Random.Range(.94f, 1.06f);
+            splashSource.PlayOneShot(splashClips[pick], SplashVolume);
         }
 
         void BuildWaterVariants()
@@ -820,6 +873,7 @@ namespace WaterTurn
             float angle = source.Turn * 90;
             if (move == Move.Turn || move == Move.TurnLeft)
             {
+                PlaySplash();
                 float direction = move == Move.Turn ? 1f : -1f;
                 for (float t = 0; t < .19f; t += Time.unscaledDeltaTime)
                 {
